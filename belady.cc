@@ -4,13 +4,12 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
-
-using namespace std;
 
 class belady {
   const size_t cache_size;
-  map <string, size_t> block_indexes;
+  std::unordered_map <std::string, size_t> block_indexes;
   size_t complete = 1;
   size_t current = 0;
 
@@ -18,7 +17,7 @@ class belady {
   belady(size_t cache_size)
       : cache_size(cache_size)
   {}
-  void access(const string &a) {
+  void access(const std::string &a) {
     if (block_indexes[a] < complete) {
       current++;
       block_indexes[a] = current;
@@ -29,13 +28,14 @@ class belady {
       size_t temp = current;
       size_t count = 0;
       while (1) {
-        size_t number_equal = count_if(block_indexes.cbegin(),
-                                       block_indexes.cend(),
-                                       [temp](pair<string, size_t> p) {
-                                         return temp==p.second;
-                                       });
-        //cout << "    number_equal=" << number_equal << endl;
+        size_t number_equal = static_cast<size_t>(std::count_if(
+            block_indexes.cbegin(), block_indexes.cend(),
+            [temp](std::pair<std::string, size_t> p) {
+              return temp==p.second;
+            }));
+        //std::cout << "    number_equal=" << number_equal << endl;
         count += number_equal;
+        // This assert *will* fail if cache_size==1.
         assert(count <= cache_size);
         if (count == cache_size || temp == complete) {
           complete = temp;
@@ -50,31 +50,69 @@ class belady {
     }
   }
   void print() const {
-    cout << "complete=" << complete
-         << " current=" << current
-         << " {";
+    std::cout << "complete=" << complete
+              << " current=" << current
+              << " {";
     size_t count = 0;
     for (const auto &pair : block_indexes) {
-      if (count > 0) cout << " ";
-      cout << pair.first << ":" << pair.second;
+      if (count > 0) std::cout << " ";
+      std::cout << pair.first << ":" << pair.second;
       count++;
     }
-    cout << "}" << endl;
+    std::cout << "}" << std::endl;
   }
   size_t get_misses() const {
     return current;
   }
 };
 
-int main(int argc [[maybe_unused]], const char *arg[] [[maybe_unused]]) {
-  vector<string> trace = {"a", "b", "c", "d", "e", "b", "c", "f", "a", "b", "g", "d"};
-  struct belady b(3);
-  b.print();
-  for (const string &a : trace) {
-    b.access(a);
-    cout << a << " ";
-    b.print();
+#if 0
+struct tinfo {
+  string address;
+  size_t original_index;
+  size_t next_access;
+};
+size_t opt(const vector<string> &trace, size_t cache_size) {
+  vector<tinfo> infos;
+  size_t i = 0;
+  for (const string& a : trace) {
+    infos.push_back({a, i++, SIZE_MAX});
   }
-  cout << "misses=" << b.get_misses() << endl;
+  stable_sort(infos.begin(), infos.end(),
+              [](const tinfo &a, const tinfo &b) {
+                return a.address < b.address;
+              });
+  for (size_t i = 0; i + 1 < infos.size(); ++i) {
+    if (infos[i].address == infos[i+1].address) {
+      infos[i].next_access = infos[i+1].original_index;
+    }
+  }
+  sort(infos.begin(), infos.end(),
+       [](const tinfo &a, const tinfo &b) {
+         return a.original_index < b.original_index;
+       });
+  auto cmp_access = [](const tinfo &a, const tinfo &b) {
+    return a.next_access > b.next_access;
+  };
+  priority_queue<tinfo, vector<tinfo>, decltype(cmp_access)> queue(cmp_access);
+  for (const tinfo& ti : infos) {
+
+  }
+}
+#endif
+
+int main(int argc [[maybe_unused]], [[maybe_unused]] const char *arg[]) {
+  const std::vector<std::string> trace =
+      {"a", "b", "c", "d", "e", "b", "c", "f", "a", "b", "g", "d"};
+  for (size_t c = 2; c < 8; ++c) {
+    belady b(c);
+    b.print();
+    for (const std::string &a : trace) {
+      b.access(a);
+      std::cout << a << " ";
+      b.print();
+    }
+    std::cout << "c=" << c << " misses=" << b.get_misses() << std::endl;
+  }
   return 0;
 }
