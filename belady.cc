@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -53,13 +54,34 @@ class belady {
     std::cout << "complete=" << complete
               << " current=" << current
               << " {";
-    size_t count = 0;
-    for (const auto &pair : block_indexes) {
-      if (count > 0) std::cout << " ";
-      std::cout << pair.first << ":" << pair.second;
-      count++;
+    // Print the block_indexes grouped by same index.
+    std::map<size_t, std::set<std::string>> invert;
+    for (const auto& [addr, index] : block_indexes) {
+      invert[index].insert(addr);
     }
-    std::cout << "}" << std::endl;
+    size_t icount = 0;
+    for (const auto& [index, addresses] : invert) {
+      if (icount > 0) std::cout << " ";
+      std::cout << "[" << index << "]={";
+      size_t acount = 0;
+      for (const std::string& address : addresses) {
+        if (acount > 0) std::cout << ", ";
+        std::cout << address;
+        ++acount;
+      }
+      std::cout << "}";
+      ++icount;
+    }
+    if (0) {
+      size_t count = 0;
+      for (const auto &pair : block_indexes) {
+        if (count > 0) std::cout << " ";
+        std::cout << pair.first << ":" << pair.second;
+        count++;
+      }
+      std::cout << "}" << std::endl;
+    }
+    std::cout << std::endl;
   }
   size_t get_misses() const {
     return current;
