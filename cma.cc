@@ -148,6 +148,12 @@ class Cma {
 };
 
 
+class csa {
+ private:
+  std::vector<std::string> lru_stack_;
+  std::vector<size_t> beta_;
+};
+
 void CheckHelper(bool c, std::string_view expr) {
   if (!c) {
     std::cerr << "Failed check: " << expr << std::endl;
