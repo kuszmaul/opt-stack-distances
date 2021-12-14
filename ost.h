@@ -1,6 +1,9 @@
 #ifndef OST_H_
 #define OST_H_
 
+class NullStruct {
+};
+
 // A combiner allows us to add together a bunch of V's to get an Value.  We use
 // this to get prefix sums.
 
@@ -47,9 +50,9 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     root_ = Insert(root_, k, v);
     Check();
   }
-  void Delete(const K& k) {
+  void Erase(const K& k) {
     Check();
-    root_ = Delete(root_, k);
+    root_ = Erase(root_, k);
     Check();
   }
   // Returns {} if idx >= Size(), else returns pair of references to the idx'th
@@ -94,11 +97,13 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   friend std::ostream& operator<<(std::ostream& out, const OrderStatisticTree& tree) {
     out << "{";
     for (size_t i = 0; i < tree.Size(); ++i) {
-      //auto o = tree.Select(i);
-      //assert(o.has_value());
-      //auto [k,v] = *o;
       if (i > 0) out << ", ";
-      out << tree.SelectPrefix(i);
+      auto o = tree.Select(i);
+      assert(o.has_value());
+      auto [k,v] = *o;
+      out << "{" << k << ", " << v << "}";
+      //if (i > 0) out << ", ";
+      //out << tree.SelectPrefix(i);
     }
     return out << "}";
   }
@@ -152,13 +157,14 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   }
   RankResult Rank(const Node *n, const K& k) {
     if (n == nullptr) return {};
-    if (n->k == k) return RankResult({SubtreeSize(n->left), n->v});
-    else if (k < n->k) return Rank(n->left, k);
-    else {
+    if (k < n->k) return Rank(n->left, k);
+    else if (n->k < k) {
       RankResult rr = Rank(n->right, k);
       if (!rr.has_value()) return {};
       auto [size, vref] = *rr;
       return RankResult({1 + SubtreeSize(n->left) + size, vref});
+    } else {
+      return RankResult({SubtreeSize(n->left), n->v});
     }
   }
   Node* Insert(Node* n, const K& k, const V& v) {
@@ -166,17 +172,17 @@ template<class K, class V, class Combiner = NullCombiner<V>>
       n = new Node(k, v);
     } else {
       n = MaybeRebalance(n);
-      if (n->k == k) {
-        n->v = v;
-        RecomputeCombination(n);
-        Check(n);
-      } else if (n->k < k) {
+      if (n->k < k) {
         UpdateRight(n, Insert(n->right, k, v));
         Check(n);
-      } else {
+      } else  if (k < n->k) {
         Check(n);
         Node *newleft = Insert(n->left, k, v);
         UpdateLeft(n, newleft);
+        Check(n);
+      } else {
+        n->v = v;
+        RecomputeCombination(n);
         Check(n);
       }
     }
@@ -194,16 +200,16 @@ template<class K, class V, class Combiner = NullCombiner<V>>
       return n->left;
     }
   }
-  static Node* Delete(Node* n, const K& k) {
+  static Node* Erase(Node* n, const K& k) {
     if (n == nullptr) return nullptr;
-    else if (n->k == k) {
-      return DeleteNode(n);
-    } else if (k < n->k) {
-      UpdateLeft(n, Delete(n->left, k));
+    else if (k < n->k) {
+      UpdateLeft(n, Erase(n->left, k));
+      return n;
+    } else if (n->k < k) {
+      UpdateRight(n, Erase(n->right, k));
       return n;
     } else {
-      UpdateRight(n, Delete(n->right, k));
-      return n;
+      return DeleteNode(n);
     }
   }
   static Node* DeleteNode(Node *n) {

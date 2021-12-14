@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "ost.h"
@@ -35,6 +36,17 @@ std::ostream& operator<<(std::ostream& os, const std::optional<size_t> &v) {
     return os << "nullopt";
   else
     return os << *v;
+}
+
+template <class T, class V>
+std::ostream& operator<<(std::ostream& os, const std::unordered_map<T, V> &map) {
+  os << "{";
+  bool first = true;
+  for (const auto &[a, b] : map) {
+    if (!first) os << ", ";
+    os << "{" << a << ", " << b << "}";
+  }
+  return os << "}";
 }
 
 size_t ComputeBetaI(const std::vector<size_t> &critical_markers, size_t i) {
@@ -150,18 +162,44 @@ class Cma {
 };
 
 
+class TimeStamp {
+ public:
+  explicit TimeStamp(size_t t) :time_(t) {}
+  TimeStamp() :TimeStamp(0) {}
+  // Prefix increment
+  TimeStamp& operator++() {
+    ++time_;
+    return *this;
+  }
+  friend bool operator<(const TimeStamp &a, const TimeStamp &b) {
+    // Sort so that bigger timestamps are first.
+    return b.time_ < a.time_;
+  }
+  friend std::ostream& operator<<(std::ostream&os, const TimeStamp &ts) {
+    return os << ts.time_;
+  }
+ private:
+  size_t time_;
+};
+
+
 class Csa {
  public:
   std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+    std::cout << std::endl << "CSA access " << t << std::endl;
+    std::cout << *this << std::endl;
     const std::optional<size_t> depth = FindDepth(t);
     most_recent_z_ = std::nullopt;
     most_recent_dopt_ = std::nullopt;
     if (!depth.has_value()) {
-      lru_stack_.insert(lru_stack_.begin(), t);
+      lru_stack_.Insert(timestep_, t);
+      stack_positions_[t] = timestep_;
+      ++timestep_;
       IncrementAllCriticalMarkers();
       critical_markers_.push_back(1);
       RecomputeBeta();
-      return {lru_stack_.size(), lru_stack_.size()};
+      size_t size = lru_stack_.Size();
+      return {size, size};
     } else if (depth == 0) {
       // state remains the same
       return {0, 0};
@@ -172,6 +210,7 @@ class Csa {
       const size_t depth_opt = FindDepthOpt(z);
       std::cout << "depth_opt=" << depth_opt << std::endl;
       RotateLruStack(*depth);
+      ++timestep_;
       for (size_t i = 1; i < critical_markers_.size(); ++i) {
         if (critical_markers_[i] < depth) ++critical_markers_[i];
       }
@@ -184,11 +223,12 @@ class Csa {
       return {depth_opt, *depth};
     }
   }
-  const std::vector<std::string> &GetL() const { return lru_stack_; }
+  const OrderStatisticTree<TimeStamp, std::string> &GetL() const { return lru_stack_; }
   const std::vector<size_t> &GetM() const { return critical_markers_; }
   const std::vector<size_t> &GetBeta() const { return beta_; }
   friend std::ostream& operator<<(std::ostream&os, const Csa &csa) {
     os << "L=" << csa.lru_stack_ << std::endl;
+    os << "S=" << csa.stack_positions_ << std::endl;
     os << "M=" << csa.critical_markers_ << std::endl;
     return os << "B=" << csa.beta_;
   }
@@ -196,18 +236,20 @@ class Csa {
   std::optional<size_t> most_recent_dopt_;
  private:
   void RotateLruStack(size_t depth) {
-    while (depth > 0) {
-      std::swap(lru_stack_[depth-1], lru_stack_[depth]);
-      depth--;
-    }
+    std::optional<std::pair<TimeStamp, std::string>> pair = lru_stack_.Select(depth);
+    assert(pair.has_value());
+    stack_positions_[pair->second] = timestep_;
+    lru_stack_.Erase(pair->first);
+    lru_stack_.Insert(timestep_, pair->second);
   }
   std::optional<size_t> FindDepth(const std::string &t) {
-    for (size_t i = 0; i < lru_stack_.size(); ++i) {
-      if (lru_stack_[i] == t) {
-        return i;
-      }
-    }
-    return {};
+    auto it = stack_positions_.find(t);
+    if (it == stack_positions_.end()) return {};
+    std::optional<std::pair<size_t, const std::string &>> rank
+        = lru_stack_.Rank(it->second);
+    assert(rank.has_value());
+    assert(rank->second == t);
+    return rank->first;
   }
   void IncrementAllCriticalMarkers() {
     for (size_t &v : critical_markers_) ++v;
@@ -229,15 +271,18 @@ class Csa {
     ComputeBeta(critical_markers_, beta_);
   }
 
+  // For each string in lru_stack_, what is it's rank in lru_stack_.
+  std::unordered_map<std::string, TimeStamp> stack_positions_;
   // All these arrays are indexed from 0, but the paper indexes from 1.
   //
-  // These vectors, when viewed as stacks have the "top" of the stack at element
-  // 0 and the bottom at, e.g., lru_stack_.back();
-  std::vector<std::string> lru_stack_;
+  // This is sorted by the negative of the access time, so that the top of the
+  // stack is first.
+  OrderStatisticTree<TimeStamp, std::string> lru_stack_;
   // Critical markers are are the same as what the paper says, but the indexes
   // are less.  For the paper's M(1) we store in critical_markers_[0].
   std::vector<size_t> critical_markers_;
   std::vector<size_t> beta_;
+  TimeStamp timestep_;
 };
 
 void CheckHelper(bool c, std::string_view expr) {
@@ -290,10 +335,22 @@ class CsaAndCma {
   std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
     auto cma_result = cma_.Access(t);
     auto csa_result = csa_.Access(t);
+    std::cout << "cma result = " << cma_result << std::endl;
+    std::cout << "csa result = " << csa_result << std::endl;
     assert(cma_result == csa_result);
     return csa_result;
   }
-  const std::vector<std::string> &GetL() const { return cma_.GetL(); }
+  const std::vector<std::string> &GetL() const {
+    const std::vector<std::string> &cma_result = cma_.GetL();
+    const OrderStatisticTree<TimeStamp, std::string> &csa_result = csa_.GetL();
+    assert(cma_result.size() == csa_result.Size());
+    for (size_t i = 0; i < cma_result.size(); ++i) {
+      std::optional<std::pair<TimeStamp, std::string>> ith = csa_result.Select(i);
+      assert(ith.has_value());
+      assert(cma_result[i] == ith->second);
+    }
+    return cma_result;
+  }
   const std::vector<size_t> &GetM() const { return cma_.GetM(); }
   const std::vector<size_t> &GetBeta() const { return cma_.GetBeta(); }
   std::optional<size_t> GetMostRecentZ() const { return cma_.most_recent_z_; }
