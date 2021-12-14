@@ -11,6 +11,8 @@
 #include <tuple>
 #include <vector>
 
+#include "ost.h"
+
 template <class T>
 std::ostream& operator<<(std::ostream &os, const std::vector<T> &v) {
   os << "{";
@@ -148,9 +150,93 @@ class Cma {
 };
 
 
-class csa {
+class Csa {
+ public:
+  std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+    const std::optional<size_t> depth = FindDepth(t);
+    most_recent_z_ = std::nullopt;
+    most_recent_dopt_ = std::nullopt;
+    if (!depth.has_value()) {
+      lru_stack_.insert(lru_stack_.begin(), t);
+      IncrementAllCriticalMarkers();
+      critical_markers_.push_back(1);
+      RecomputeBeta();
+      return {lru_stack_.size(), lru_stack_.size()};
+    } else if (depth == 0) {
+      // state remains the same
+      return {0, 0};
+    } else {
+      std::cout << "D=" << *depth << std::endl;
+      const size_t z = FindZ(*depth);
+      std::cout << "z=" << z << std::endl;
+      const size_t depth_opt = FindDepthOpt(z);
+      std::cout << "depth_opt=" << depth_opt << std::endl;
+      RotateLruStack(*depth);
+      for (size_t i = 1; i < critical_markers_.size(); ++i) {
+        if (critical_markers_[i] < depth) ++critical_markers_[i];
+      }
+      critical_markers_[depth_opt] = 1;
+      //std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
+      RecomputeBeta();
+      //std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
+      most_recent_z_ = z;
+      most_recent_dopt_ = depth_opt;
+      return {depth_opt, *depth};
+    }
+  }
+  const std::vector<std::string> &GetL() const { return lru_stack_; }
+  const std::vector<size_t> &GetM() const { return critical_markers_; }
+  const std::vector<size_t> &GetBeta() const { return beta_; }
+  friend std::ostream& operator<<(std::ostream&os, const Csa &csa) {
+    os << "L=" << csa.lru_stack_ << std::endl;
+    os << "M=" << csa.critical_markers_ << std::endl;
+    return os << "B=" << csa.beta_;
+  }
+  std::optional<size_t> most_recent_z_;
+  std::optional<size_t> most_recent_dopt_;
  private:
+  void RotateLruStack(size_t depth) {
+    while (depth > 0) {
+      std::swap(lru_stack_[depth-1], lru_stack_[depth]);
+      depth--;
+    }
+  }
+  std::optional<size_t> FindDepth(const std::string &t) {
+    for (size_t i = 0; i < lru_stack_.size(); ++i) {
+      if (lru_stack_[i] == t) {
+        return i;
+      }
+    }
+    return {};
+  }
+  void IncrementAllCriticalMarkers() {
+    for (size_t &v : critical_markers_) ++v;
+  }
+  size_t FindZ(size_t depth) const {
+    size_t result = 0;
+    for (size_t i = 0; i < depth; ++i) {
+      if (beta_[i] == 0) result = i;
+    }
+    return result;
+  }
+  size_t FindDepthOpt(size_t z) const {
+    for (size_t i = 1; i < critical_markers_.size(); ++i) {
+      if (critical_markers_[i] > z) return i;
+    }
+    assert(0);
+  }
+  void RecomputeBeta() {
+    ComputeBeta(critical_markers_, beta_);
+  }
+
+  // All these arrays are indexed from 0, but the paper indexes from 1.
+  //
+  // These vectors, when viewed as stacks have the "top" of the stack at element
+  // 0 and the bottom at, e.g., lru_stack_.back();
   std::vector<std::string> lru_stack_;
+  // Critical markers are are the same as what the paper says, but the indexes
+  // are less.  For the paper's M(1) we store in critical_markers_[0].
+  std::vector<size_t> critical_markers_;
   std::vector<size_t> beta_;
 };
 
@@ -199,11 +285,33 @@ static void TestBeta() {
   TestBetaFor({4, 3, 2, 1, 1}, {0, 1, 1, 1, 0});
 }
 
+class CsaAndCma {
+ public:
+  std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+    auto cma_result = cma_.Access(t);
+    auto csa_result = csa_.Access(t);
+    assert(cma_result == csa_result);
+    return csa_result;
+  }
+  const std::vector<std::string> &GetL() const { return cma_.GetL(); }
+  const std::vector<size_t> &GetM() const { return cma_.GetM(); }
+  const std::vector<size_t> &GetBeta() const { return cma_.GetBeta(); }
+  std::optional<size_t> GetMostRecentZ() const { return cma_.most_recent_z_; }
+  std::optional<size_t> GetMostRecentDopt() const { return cma_.most_recent_dopt_; }
+  friend std::ostream& operator<<(std::ostream&os, const CsaAndCma &both) {
+    return os << both.cma_;
+  }
+
+ private:
+  Cma cma_;
+  Csa csa_;
+};
+
 using TI = std::tuple<size_t, size_t>;
 using VI = std::vector<size_t>;
 
 static void TestABCDEB() {
-  Cma cma;
+  CsaAndCma cma;
   CHECK_EQ(cma.Access("a"), TI({1ul, 1ul}));
   CHECK_EQ(cma.GetL(), {"a"});
   CHECK_EQ(cma.GetM(), {1});
@@ -233,8 +341,8 @@ static void TestABCDEB() {
   CHECK_EQ(cma.Access("b"), TI({1ul, 3ul}));
   // In the original paper, this would be 3, but since we are using 1-based
   // indexing it's two.
-  CHECK_EQ(cma.most_recent_z_, std::optional<size_t>(2ul));
-  CHECK_EQ(cma.most_recent_dopt_, std::optional<size_t>(1ul));
+  CHECK_EQ(cma.GetMostRecentZ(), std::optional<size_t>(2ul));
+  CHECK_EQ(cma.GetMostRecentDopt(), std::optional<size_t>(1ul));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"b", "e", "d", "c", "a"}));
   CHECK_EQ(cma.GetM(), VI({5, 1, 3, 3, 2}));
 }
