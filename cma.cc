@@ -192,7 +192,7 @@ class Csa {
     most_recent_z_ = std::nullopt;
     most_recent_dopt_ = std::nullopt;
     if (!depth.has_value()) {
-      lru_stack_.Insert(timestep_, t);
+      lru_stack_.InsertOrAssign(timestep_, t);
       stack_positions_[t] = timestep_;
       ++timestep_;
       IncrementAllCriticalMarkers();
@@ -240,16 +240,14 @@ class Csa {
     assert(pair.has_value());
     stack_positions_[pair->second] = timestep_;
     lru_stack_.Erase(pair->first);
-    lru_stack_.Insert(timestep_, pair->second);
+    lru_stack_.InsertOrAssign(timestep_, pair->second);
   }
   std::optional<size_t> FindDepth(const std::string &t) {
     auto it = stack_positions_.find(t);
     if (it == stack_positions_.end()) return {};
-    std::optional<std::pair<size_t, const std::string &>> rank
-        = lru_stack_.Rank(it->second);
-    assert(rank.has_value());
-    assert(rank->second == t);
-    return rank->first;
+    auto [rank, pair] = lru_stack_.Rank(it->second);
+    assert(pair.second == t);
+    return rank;
   }
   void IncrementAllCriticalMarkers() {
     for (size_t &v : critical_markers_) ++v;

@@ -38,14 +38,18 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   size_t Size() const {
     return SubtreeSize(root_);
   }
-  using RankResult = std::optional<std::pair<size_t, const V&>>;
-  // Returns the rank of k as well as a reference to the associated value, or
-  // no_value if k is not present.
+  using ValueType = std::pair<const K, V>;
+  using RankResult = std::pair<size_t, ValueType&>;
+  // Returns the rank of k as well as a reference to the associated pair.
+  // Requires k is present.
   RankResult Rank(const K& k) {
     Check();
     return Rank(root_, k);
   }
-  void Insert(const K& k, const V& v) {
+  const RankResult Rank(const K& k) const {
+    return Rank(const_cast<OrderStatisticTree>(*this)->Rank(k));
+  }
+  void InsertOrAssign(const K& k, const V& v) {
     Check();
     root_ = Insert(root_, k, v);
     Check();
@@ -55,15 +59,16 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     root_ = Erase(root_, k);
     Check();
   }
-  // Returns {} if idx >= Size(), else returns pair of references to the idx'th
-  // key and value.
-  std::optional<std::pair<K, V>> Select(size_t idx) const {
+  // Requires idx < Size().  Returns a reference to the const key-value pair
+  // with rank idx.
+  const std::pair<const K, V>& Select(size_t idx) const {
     Check();
-    if (idx >= Size()) return {};
+    assert(idx < Size());
     const Node* n = Select(root_, idx);
-    return std::pair<const K&, const V&>(n->k, n->v);
+    return n->pair;
   }
-  // Returns the combined value the first idx values.
+  // Returns the combined value the first idx values.  If idx is too big,
+  // returns the sum of all the values.
   const typename Combiner::Value SelectPrefix(size_t idx) const {
     Check();
     if (idx >= Size()) return root_ ? Combiner(root_->v).GetValue() : Combiner().GetValue();
@@ -98,9 +103,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     out << "{";
     for (size_t i = 0; i < tree.Size(); ++i) {
       if (i > 0) out << ", ";
-      auto o = tree.Select(i);
-      assert(o.has_value());
-      auto [k,v] = *o;
+      auto [k, v] = tree.Select(i);
       out << "{" << k << ", " << v << "}";
       //if (i > 0) out << ", ";
       //out << tree.SelectPrefix(i);
@@ -155,16 +158,14 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     Check(n);
     return n;
   }
-  RankResult Rank(const Node *n, const K& k) {
-    if (n == nullptr) return {};
-    if (k < n->k) return Rank(n->left, k);
-    else if (n->k < k) {
-      RankResult rr = Rank(n->right, k);
-      if (!rr.has_value()) return {};
-      auto [size, vref] = *rr;
-      return RankResult({1 + SubtreeSize(n->left) + size, vref});
+  RankResult Rank(Node *n, const K& k) {
+    assert(n != nullptr);
+    if (k < GetKey(n)) return Rank(n->left, k);
+    else if (GetKey(n) < k) {
+      auto [size, pair] = Rank(n->right, k);
+      return {1 + SubtreeSize(n->left) + size, pair};
     } else {
-      return RankResult({SubtreeSize(n->left), n->v});
+      return {SubtreeSize(n->left), n->pair};
     }
   }
   Node* Insert(Node* n, const K& k, const V& v) {
@@ -172,16 +173,16 @@ template<class K, class V, class Combiner = NullCombiner<V>>
       n = new Node(k, v);
     } else {
       n = MaybeRebalance(n);
-      if (n->k < k) {
+      if (GetKey(n) < k) {
         UpdateRight(n, Insert(n->right, k, v));
         Check(n);
-      } else  if (k < n->k) {
+      } else  if (k < GetKey(n)) {
         Check(n);
         Node *newleft = Insert(n->left, k, v);
         UpdateLeft(n, newleft);
         Check(n);
       } else {
-        n->v = v;
+        GetVal(n) = v;
         RecomputeCombination(n);
         Check(n);
       }
@@ -202,10 +203,10 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   }
   static Node* Erase(Node* n, const K& k) {
     if (n == nullptr) return nullptr;
-    else if (k < n->k) {
+    else if (k < GetKey(n)) {
       UpdateLeft(n, Erase(n->left, k));
       return n;
-    } else if (n->k < k) {
+    } else if (GetKey(n) < k) {
       UpdateRight(n, Erase(n->right, k));
       return n;
     } else {
@@ -270,7 +271,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     RecomputeSubtreeSummary(n);
   }
   static void RecomputeCombination(Node *n) {
-    n->subtree_value.Combine(n->v,
+    n->subtree_value.Combine(GetVal(n),
                              n->left ? &n->left->subtree_value : nullptr,
                              n->right ? &n->right->subtree_value : nullptr);
   }
@@ -285,26 +286,34 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   static void Check(const Node *n) {
     if (!n) return;
     assert(n->subtree_size == 1 + SubtreeSize(n->left) + SubtreeSize(n->right));
-    n->subtree_value.Check(n->v,
+    n->subtree_value.Check(GetVal(n),
                            n->left ? &n->left->subtree_value : nullptr,
                            n->right ? &n->right->subtree_value : nullptr);
     if (n->left) {
-      assert(n->left->k < n->k);
+      assert(GetKey(n->left) < GetKey(n));
       if (check_expensive) Check(n->left);
     }
     if (n->right) {
-      assert(n->k < n->right->k);
+      assert(GetKey(n) < GetKey(n->right));
       if (check_expensive) Check(n->right);
     }
+  }
+  static const K& GetKey(const Node *n) {
+    return n->pair.first;
+  }
+  static const V& GetVal(const Node *n) {
+    return n->pair.second;
+  }
+  static V& GetVal(Node *n) {
+    return n->pair.second;
   }
   struct Node {
     size_t subtree_size = 1;
     Node* left = nullptr;
     Node* right = nullptr;
-    K k;
-    V v;
+    std::pair<const K, V> pair;
     Combiner subtree_value;
-    Node(const K& k, const V&v) :k(k), v(v), subtree_value(v) {}
+    Node(const K& k, const V&v) :pair({k, v}), subtree_value(v) {}
   };
   Node *root_ = nullptr;
   // Reuse tmp_ to avoid memory allocations during rebalance.
