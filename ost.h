@@ -9,7 +9,7 @@ class NullStruct {
 
 // The nullcombiner doesn't add anything.
 template<class V>
-class NullCombiner {
+struct NullCombiner {
  public:
   static constexpr bool IsPrintable = false;
   NullCombiner() {}
@@ -245,13 +245,15 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   static Combiner SelectPrefix(const Node *n, size_t idx) {
     if (n == nullptr) return Combiner();
     if (SubtreeSize(n->left) == idx) {
-      return (n->left ? n->left->subtree_value : Combiner())
-          + Combiner(GetVal(n));
+      if (n->left) {
+        return n->left->subtree_value + Combiner(GetVal(n));
+      } else {
+        return Combiner(GetVal(n));
+      }
     } else if (SubtreeSize(n->left) > idx) {
       return SelectPrefix(n->left, idx);
     } else {
-      return (n->left ? n->left->subtree_value : Combiner())
-          + Combiner(GetVal(n))
+      return (n->left ? n->left->subtree_value + Combiner(GetVal(n)) : Combiner(GetVal(n)))
           + SelectPrefix(n->right, idx - SubtreeSize(n->left) - 1ul);
     }
   }
@@ -331,7 +333,6 @@ template<class K, class V, class Combiner = NullCombiner<V>>
 
 template<class V>
 struct AddCombiner {
- public:
   static constexpr bool IsPrintable = true;
   AddCombiner() {}
   explicit AddCombiner(const V& v) :sum(v) {}
@@ -345,6 +346,6 @@ struct AddCombiner {
   V sum = 0;
 };
 
-template<class K, class V>
-using PrefixTree = OrderStatisticTree<K, V, AddCombiner<V>>;
+template<class K, class V, class Combiner=AddCombiner<V>>
+using PrefixTree = OrderStatisticTree<K, V, Combiner>;
 #endif  // OST_H_

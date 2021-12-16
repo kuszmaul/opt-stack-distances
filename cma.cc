@@ -190,21 +190,35 @@ class SizetComparesBackward {
 
 using TimeStamp = SizetComparesBackward;
 
-#if 0
 struct BetaPrefix {
-  static constexpr bool ValueIsPrintable = true;
+  static constexpr bool IsPrintable = true;
   BetaPrefix() :BetaPrefix(0) {}
   explicit BetaPrefix(ptrdiff_t increment)
       :sum(increment), relative_depth(increment < 0 ? increment : 0),
-       distance_from_min(increment < 0 ? 0 : 1) {}
-  using Value =
+       distance_from_min(increment < 0 ? 0 : 1), tree_size(1) {}
+  BetaPrefix operator+(const BetaPrefix &b) const {
+    BetaPrefix result;
+    result.sum = sum + b.sum;
+    result.relative_depth = std::max(relative_depth,
+                                     sum + b.relative_depth);
+    result.distance_from_min =
+        (relative_depth > sum + b.relative_depth)
+        ? (distance_from_min + b.tree_size)
+        : b.distance_from_min;
+    result.tree_size = tree_size + b.tree_size;
+    return result;
+  }
+
+  friend std::ostream& operator<<(std::ostream& out, const BetaPrefix& n) {
+    return out << "{s=" << n.sum << " rd=" << n.relative_depth << " dmin="
+               << n.distance_from_min << " ts=" << n.tree_size << "}";
+  }
 
   ptrdiff_t sum;
   ptrdiff_t relative_depth;
   size_t    distance_from_min;
-
+  size_t    tree_size;
 };
-#endif
 
 class Csa {
  public:
@@ -281,7 +295,9 @@ class Csa {
     os << "Ginv=" << csa.gamma_inverted_ << std::endl;
     os << "S=" << csa.stack_positions_ << std::endl;
     os << "M=" << csa.critical_markers_ << std::endl;
-    return os << "B=" << csa.beta_;
+    os << "B=" << csa.beta_ << std::endl;
+    os << "Bd=" << csa.beta_diff_;
+    return os;
   }
   void Validate() const {
     for (size_t i = 0; i < beta_.size(); ++i) {
@@ -423,7 +439,7 @@ class Csa {
   // are less.  For the paper's M(1) we store in critical_markers_[0].
   std::vector<size_t> critical_markers_;
   std::vector<size_t> beta_; // to be deprecated
-  PrefixTree<SizetComparesBackward, ptrdiff_t> beta_diff_;
+  PrefixTree<SizetComparesBackward, ptrdiff_t, BetaPrefix> beta_diff_;
   SizetComparesBackward beta_counter_;
 };
 
