@@ -190,6 +190,29 @@ class SizetComparesBackward {
 
 using TimeStamp = SizetComparesBackward;
 
+#if 0
+struct BetaPrefix {
+  static constexpr bool ValueIsPrintable = true;
+  BetaPrefix() :BetaPrefix(0) {}
+  explicit BetaPrefix(ptrdiff_t increment)
+      :sum(increment), relative_depth(increment < 0 ? increment : 0),
+       distance_from_min(increment < 0 ? 0 : 1) {}
+  void Combine(const ptrdiff_t v,
+               const BetaPrefix *leftv,
+               const BetaPrefix *rightv) {
+    if (leftv && rightv) {
+      sum = leftv->sum + v + rightv->sum;
+      relative_depth = std::min(leftv->relative_depth
+    relative_depth = min(
+  }
+
+  ptrdiff_t sum;
+  ptrdiff_t relative_depth;
+  size_t    distance_from_min;
+
+};
+#endif
+
 class Csa {
  public:
   std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {

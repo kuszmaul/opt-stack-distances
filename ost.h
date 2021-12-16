@@ -20,7 +20,9 @@ class NullCombiner {
   }
   using Value = void;
   void GetValue() const {}
-  NullCombiner operator+([[maybe_unused]] const NullCombiner b) const {}
+  NullCombiner operator+([[maybe_unused]] const NullCombiner b) const {
+    return *this;
+  }
   void Check([[maybe_unused]] const V& v,
              [[maybe_unused]] const NullCombiner *a,
              [[maybe_unused]] const NullCombiner *b) const {
@@ -275,9 +277,14 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     RecomputeSubtreeSummary(n);
   }
   static void RecomputeCombination(Node *n) {
-    n->subtree_value.Combine(GetVal(n),
-                             n->left ? &n->left->subtree_value : nullptr,
-                             n->right ? &n->right->subtree_value : nullptr);
+    if (n->left) {
+      n->subtree_value = n->left->subtree_value + Combiner(GetVal(n));
+    } else {
+      n->subtree_value = Combiner(GetVal(n));
+    }
+    if (n->right) {
+      n->subtree_value = n->subtree_value + n->right->subtree_value;
+    }
   }
   static void RecomputeSubtreeSummary(Node *n) {
     n->subtree_size = 1ul + SubtreeSize(n->left) + SubtreeSize(n->right);
@@ -290,9 +297,11 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   static void Check(const Node *n) {
     if (!n) return;
     assert(n->subtree_size == 1 + SubtreeSize(n->left) + SubtreeSize(n->right));
+#if 0
     n->subtree_value.Check(GetVal(n),
                            n->left ? &n->left->subtree_value : nullptr,
                            n->right ? &n->right->subtree_value : nullptr);
+#endif
     if (n->left) {
       assert(GetKey(n->left) < GetKey(n));
       if (check_expensive) Check(n->left);
@@ -330,10 +339,9 @@ class AddCombiner {
   static constexpr bool ValueIsPrintable = true;
   AddCombiner() {}
   explicit AddCombiner(const V& v) :sum_(v) {}
-  void Combine(const V& v,
-               const AddCombiner* leftv,
+  void Combine(const AddCombiner* leftv,
                const AddCombiner* rightv) {
-    sum_ = v + (leftv ? leftv->sum_ : 0) + (rightv ? rightv->sum_ : 0);
+    sum_ = (leftv ? leftv->sum_ : 0) + (rightv ? rightv->sum_ : 0);
   }
   using Value = V;
   const V GetValue() const {
@@ -342,9 +350,11 @@ class AddCombiner {
   AddCombiner operator+(const AddCombiner b) const {
     return AddCombiner(sum_ + b.sum_);
   }
+#if 0
   void Check(const V& v, const AddCombiner *a, const AddCombiner *b) const {
     assert(sum_ == v + (a ? a->sum_ : 0) + (b ? b->sum_ : 0));
   }
+#endif
 
  private:
   friend std::ostream& operator<<(std::ostream& out, const AddCombiner& n) {
