@@ -197,14 +197,7 @@ struct BetaPrefix {
   explicit BetaPrefix(ptrdiff_t increment)
       :sum(increment), relative_depth(increment < 0 ? increment : 0),
        distance_from_min(increment < 0 ? 0 : 1) {}
-  void Combine(const ptrdiff_t v,
-               const BetaPrefix *leftv,
-               const BetaPrefix *rightv) {
-    if (leftv && rightv) {
-      sum = leftv->sum + v + rightv->sum;
-      relative_depth = std::min(leftv->relative_depth
-    relative_depth = min(
-  }
+  using Value =
 
   ptrdiff_t sum;
   ptrdiff_t relative_depth;
@@ -292,11 +285,11 @@ class Csa {
   }
   void Validate() const {
     for (size_t i = 0; i < beta_.size(); ++i) {
-      if (beta_[i] != static_cast<size_t>(beta_diff_.SelectPrefix(i))) {
+      if (beta_[i] != static_cast<size_t>(beta_diff_.SelectPrefix(i).sum)) {
         std::cout << "just before assertion failed:" << std::endl << *this << std::endl;
         std::cout << "beta_[" << i << "]=" << beta_[i] << std::endl;
         std::cout << "beta_diff_ prefix (" << i << ")=" << beta_diff_.SelectPrefix(i) << std::endl;
-        assert(beta_[i] == static_cast<size_t>(beta_diff_.SelectPrefix(i)));
+        assert(beta_[i] == static_cast<size_t>(beta_diff_.SelectPrefix(i).sum));
       }
     }
   }

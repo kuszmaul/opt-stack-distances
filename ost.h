@@ -11,13 +11,9 @@ class NullStruct {
 template<class V>
 class NullCombiner {
  public:
-  static constexpr bool ValueIsPrintable = false;
+  static constexpr bool IsPrintable = false;
   NullCombiner() {}
   explicit NullCombiner([[maybe_unused]] const V& v) {}
-  void Combine([[maybe_unused]] const V& v,
-               [[maybe_unused]] const NullCombiner* leftv,
-               [[maybe_unused]] const NullCombiner* rightv) const {
-  }
   using Value = void;
   void GetValue() const {}
   NullCombiner operator+([[maybe_unused]] const NullCombiner b) const {
@@ -71,10 +67,10 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   }
   // Returns the combined value the first idx values.  If idx is too big,
   // returns the sum of all the values.
-  const typename Combiner::Value SelectPrefix(size_t idx) const {
+  const Combiner SelectPrefix(size_t idx) const {
     Check();
-    if (idx >= Size()) return root_ ? Combiner(GetVal(root_)).GetValue() : Combiner().GetValue();
-    return SelectPrefix(root_, idx).GetValue();
+    if (idx >= Size()) return root_ ? root_->subtree_value : Combiner();
+    return SelectPrefix(root_, idx);
   }
   void Check() const {
     Check(root_);
@@ -107,7 +103,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
       if (i > 0) out << ", ";
       auto [k, v] = tree.Select(i);
       out << "{" << k << ", " << v;
-      if constexpr (Combiner::ValueIsPrintable) {
+      if constexpr (Combiner::IsPrintable) {
         out << ", " << tree.SelectPrefix(i);
       }
       out << "}";
@@ -334,34 +330,19 @@ template<class K, class V, class Combiner = NullCombiner<V>>
 };
 
 template<class V>
-class AddCombiner {
+struct AddCombiner {
  public:
-  static constexpr bool ValueIsPrintable = true;
+  static constexpr bool IsPrintable = true;
   AddCombiner() {}
-  explicit AddCombiner(const V& v) :sum_(v) {}
-  void Combine(const AddCombiner* leftv,
-               const AddCombiner* rightv) {
-    sum_ = (leftv ? leftv->sum_ : 0) + (rightv ? rightv->sum_ : 0);
-  }
-  using Value = V;
-  const V GetValue() const {
-    return sum_;
-  }
+  explicit AddCombiner(const V& v) :sum(v) {}
   AddCombiner operator+(const AddCombiner b) const {
-    return AddCombiner(sum_ + b.sum_);
+    return AddCombiner(sum + b.sum);
   }
-#if 0
-  void Check(const V& v, const AddCombiner *a, const AddCombiner *b) const {
-    assert(sum_ == v + (a ? a->sum_ : 0) + (b ? b->sum_ : 0));
-  }
-#endif
-
- private:
   friend std::ostream& operator<<(std::ostream& out, const AddCombiner& n) {
-    return out << n.sum_;
+    return out << n.sum;
   }
 
-  V sum_ = 0;
+  V sum = 0;
 };
 
 template<class K, class V>
