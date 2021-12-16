@@ -162,26 +162,33 @@ class Cma {
 };
 
 
-class TimeStamp {
+class SizetComparesBackward {
  public:
-  explicit TimeStamp(size_t t) :time_(t) {}
-  TimeStamp() :TimeStamp(0) {}
+  explicit SizetComparesBackward(size_t t) :v_(t) {}
+  SizetComparesBackward() :SizetComparesBackward(0) {}
   // Prefix increment
-  TimeStamp& operator++() {
-    ++time_;
+  SizetComparesBackward& operator++() {
+    ++v_;
     return *this;
   }
-  friend bool operator<(const TimeStamp &a, const TimeStamp &b) {
-    // Sort so that bigger timestamps are first.
-    return b.time_ < a.time_;
+  // Postfix increment
+  SizetComparesBackward operator++(int) {
+    SizetComparesBackward temp = *this;
+    ++*this;
+    return temp;
   }
-  friend std::ostream& operator<<(std::ostream&os, const TimeStamp &ts) {
-    return os << ts.time_;
+  friend bool operator<(const SizetComparesBackward &a, const SizetComparesBackward &b) {
+    // Sort so that bigger timestamps are first.
+    return b.v_ < a.v_;
+  }
+  friend std::ostream& operator<<(std::ostream&os, const SizetComparesBackward &ts) {
+    return os << ts.v_;
   }
  private:
-  size_t time_;
+  size_t v_;
 };
 
+using TimeStamp = SizetComparesBackward;
 
 class Csa {
  public:
@@ -198,6 +205,7 @@ class Csa {
       IncrementAllCriticalMarkers();
       critical_markers_.push_back(1);
       RecomputeBeta();
+      beta_diff_.InsertOrAssign(beta_counter_++, 0);
       size_t size = lru_stack_.Size();
       return {size, size};
     } else if (depth == 0) {
@@ -215,9 +223,24 @@ class Csa {
         if (critical_markers_[i] < depth) ++critical_markers_[i];
       }
       critical_markers_[depth_opt] = 1;
-      //std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
+      std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
       RecomputeBeta();
-      //std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
+      std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
+      std::cout << "depth_opt=" << depth_opt << std::endl;
+      std::cout << "beta_diff_=" << beta_diff_ << std::endl;
+      {
+        const auto [k, v] = beta_diff_.Select(*depth);
+        beta_diff_.InsertOrAssign(k, v+1);
+        std::cout << "+1 beta_diff_=" << beta_diff_ << std::endl;
+      }
+      {
+        size_t M_star = critical_markers_[depth_opt - 1];
+        std::cout << "M_star=" << M_star << std::endl;
+        const auto [k, v] = beta_diff_.Select(M_star - 1);
+        std::cout << "select found k=" << k << std::endl;
+        beta_diff_.InsertOrAssign(k, v-1);
+        std::cout << "-1 beta_diff_=" << beta_diff_ << std::endl;
+      }
       most_recent_z_ = z;
       most_recent_dopt_ = depth_opt;
       return {depth_opt, *depth};
@@ -232,6 +255,16 @@ class Csa {
     os << "M=" << csa.critical_markers_ << std::endl;
     return os << "B=" << csa.beta_;
   }
+  void Validate() const {
+    for (size_t i = 0; i < beta_.size(); ++i) {
+      if (beta_[i] != static_cast<size_t>(beta_diff_.SelectPrefix(i))) {
+        std::cout << "just before assertion failed:" << std::endl << *this << std::endl;
+        std::cout << "beta_[" << i << "]=" << beta_[i] << std::endl;
+        std::cout << "beta_diff_ prefix (" << i << ")=" << beta_diff_.SelectPrefix(i) << std::endl;
+        assert(beta_[i] == static_cast<size_t>(beta_diff_.SelectPrefix(i)));
+      }
+    }
+  }
   std::optional<size_t> most_recent_z_;
   std::optional<size_t> most_recent_dopt_;
  private:
@@ -245,8 +278,9 @@ class Csa {
   std::optional<size_t> FindDepth(const std::string &t) {
     auto it = stack_positions_.find(t);
     if (it == stack_positions_.end()) return {};
-    auto [rank, pair] = lru_stack_.Rank(it->second);
-    assert(pair.second == t);
+    auto [rank, pairptr] = lru_stack_.Rank(it->second);
+    assert(pairptr);
+    assert(pairptr->second == t);
     return rank;
   }
   void IncrementAllCriticalMarkers() {
@@ -276,11 +310,13 @@ class Csa {
   // This is sorted by the negative of the access time, so that the top of the
   // stack is first.
   OrderStatisticTree<TimeStamp, std::string> lru_stack_;
+  TimeStamp timestep_;
   // Critical markers are are the same as what the paper says, but the indexes
   // are less.  For the paper's M(1) we store in critical_markers_[0].
   std::vector<size_t> critical_markers_;
   std::vector<size_t> beta_;
-  TimeStamp timestep_;
+  PrefixTree<SizetComparesBackward, ptrdiff_t> beta_diff_;
+  SizetComparesBackward beta_counter_;
 };
 
 void CheckHelper(bool c, std::string_view expr) {
@@ -336,6 +372,7 @@ class CsaAndCma {
     std::cout << "cma result = " << cma_result << std::endl;
     std::cout << "csa result = " << csa_result << std::endl;
     assert(cma_result == csa_result);
+    csa_.Validate();
     return csa_result;
   }
   const std::vector<std::string> &GetL() const {

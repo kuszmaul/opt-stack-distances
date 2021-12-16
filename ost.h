@@ -11,6 +11,7 @@ class NullStruct {
 template<class V>
 class NullCombiner {
  public:
+  static constexpr bool ValueIsPrintable = false;
   NullCombiner() {}
   explicit NullCombiner([[maybe_unused]] const V& v) {}
   void Combine([[maybe_unused]] const V& v,
@@ -39,15 +40,14 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     return SubtreeSize(root_);
   }
   using ValueType = std::pair<const K, V>;
-  using RankResult = std::pair<size_t, ValueType&>;
-  // Returns the rank of k as well as a reference to the associated pair.
-  // Requires k is present.
-  RankResult Rank(const K& k) {
+  using RankResult = std::pair<size_t, const ValueType*>;
+  // Returns the number of key-value pairs that are less than k.  If there is a
+  // key-value pair matching k, the second element is a pointer to a const pair.
+  // The pair is const since, to modify it, you must call InsertOrAssign to get
+  // the prefix sums updated properly.
+  const RankResult Rank(const K& k) const {
     Check();
     return Rank(root_, k);
-  }
-  const RankResult Rank(const K& k) const {
-    return Rank(const_cast<OrderStatisticTree>(*this)->Rank(k));
   }
   void InsertOrAssign(const K& k, const V& v) {
     Check();
@@ -71,7 +71,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   // returns the sum of all the values.
   const typename Combiner::Value SelectPrefix(size_t idx) const {
     Check();
-    if (idx >= Size()) return root_ ? Combiner(root_->v).GetValue() : Combiner().GetValue();
+    if (idx >= Size()) return root_ ? Combiner(GetVal(root_)).GetValue() : Combiner().GetValue();
     return SelectPrefix(root_, idx).GetValue();
   }
   void Check() const {
@@ -104,7 +104,11 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     for (size_t i = 0; i < tree.Size(); ++i) {
       if (i > 0) out << ", ";
       auto [k, v] = tree.Select(i);
-      out << "{" << k << ", " << v << "}";
+      out << "{" << k << ", " << v;
+      if constexpr (Combiner::ValueIsPrintable) {
+        out << ", " << tree.SelectPrefix(i);
+      }
+      out << "}";
       //if (i > 0) out << ", ";
       //out << tree.SelectPrefix(i);
     }
@@ -158,14 +162,14 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     Check(n);
     return n;
   }
-  RankResult Rank(Node *n, const K& k) {
+  static RankResult Rank(const Node *n, const K& k) {
     assert(n != nullptr);
     if (k < GetKey(n)) return Rank(n->left, k);
     else if (GetKey(n) < k) {
       auto [size, pair] = Rank(n->right, k);
       return {1 + SubtreeSize(n->left) + size, pair};
     } else {
-      return {SubtreeSize(n->left), n->pair};
+      return {SubtreeSize(n->left), &n->pair};
     }
   }
   Node* Insert(Node* n, const K& k, const V& v) {
@@ -244,12 +248,12 @@ template<class K, class V, class Combiner = NullCombiner<V>>
     if (n == nullptr) return Combiner();
     if (SubtreeSize(n->left) == idx) {
       return (n->left ? n->left->subtree_value : Combiner())
-          + Combiner(n->v);
+          + Combiner(GetVal(n));
     } else if (SubtreeSize(n->left) > idx) {
       return SelectPrefix(n->left, idx);
     } else {
       return (n->left ? n->left->subtree_value : Combiner())
-          + Combiner(n->v)
+          + Combiner(GetVal(n))
           + SelectPrefix(n->right, idx - SubtreeSize(n->left) - 1ul);
     }
   }
@@ -323,6 +327,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
 template<class V>
 class AddCombiner {
  public:
+  static constexpr bool ValueIsPrintable = true;
   AddCombiner() {}
   explicit AddCombiner(const V& v) :sum_(v) {}
   void Combine(const V& v,
