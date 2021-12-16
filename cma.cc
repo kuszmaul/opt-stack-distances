@@ -200,13 +200,15 @@ class Csa {
     most_recent_dopt_ = std::nullopt;
     if (!depth.has_value()) {
       lru_stack_.InsertOrAssign(timestep_, t);
+      size_t size = lru_stack_.Size();
+      gamma_.InsertOrAssign(timestep_, size);
+      gamma_inverted_.insert({size, timestep_});
       stack_positions_[t] = timestep_;
       ++timestep_;
       IncrementAllCriticalMarkers();
       critical_markers_.push_back(1);
       RecomputeBeta();
       beta_diff_.InsertOrAssign(beta_counter_++, 0);
-      size_t size = lru_stack_.Size();
       return {size, size};
     } else if (depth == 0) {
       // state remains the same
@@ -218,6 +220,14 @@ class Csa {
       const size_t depth_opt = FindDepthOpt(z);
       std::cout << "depth_opt=" << depth_opt << std::endl;
       RotateLruStack(*depth);
+      {
+        auto it = gamma_inverted_.find(depth_opt);
+        assert(it != gamma_inverted_.end());
+        TimeStamp gamma_at = it->second;
+        it->second = timestep_;  // set gamma_inverted[*depth] = timestep_
+        gamma_.Erase(gamma_at);
+        gamma_.InsertOrAssign(timestep_, depth_opt);
+      }
       ++timestep_;
       for (size_t i = 1; i < critical_markers_.size(); ++i) {
         if (critical_markers_[i] < depth) ++critical_markers_[i];
@@ -251,6 +261,8 @@ class Csa {
   const std::vector<size_t> &GetBeta() const { return beta_; }
   friend std::ostream& operator<<(std::ostream&os, const Csa &csa) {
     os << "L=" << csa.lru_stack_ << std::endl;
+    os << "G=" << csa.gamma_ << std::endl;
+    os << "Ginv=" << csa.gamma_inverted_ << std::endl;
     os << "S=" << csa.stack_positions_ << std::endl;
     os << "M=" << csa.critical_markers_ << std::endl;
     return os << "B=" << csa.beta_;
@@ -303,6 +315,42 @@ class Csa {
     ComputeBeta(critical_markers_, beta_);
   }
 
+  // In BilardiEkPa17 the critical stack algorithm is described two ways: as a
+  // set of stacks and as a set of trees.
+  //
+  //   A is the address trace.  (The paper refers to a tree T^{A}, but all
+  //   that's needed is a hash table.)
+  //
+  //   Lambda is the LRU stack (the tree version is called T^\Lambda in the
+  //   paper).
+  //
+  //   Gamma is the sequence of capacities in the order in which they became
+  //   most recently critical.  For example, suppose we have a trace that the
+  //   last 4 accesses with critical stack distances of 3, 7, 3, 5.  That means
+  //   that a cache of size 3 has a hit (but 4 would miss), then 7 has a hit
+  //   (but 8 would miss), then 3 has a hit (but 4 would miss) then 5 has a hit
+  //   (but 6 would miss.)  Then the first 3 elements of Gamma would be {5,3,7}.
+  //
+  //   Beta is the *imbalance function* (the tree version is called T^\Beta).
+  //   The paper essentially describes a prefix sum tree in which Beta(i) is
+  //   calculated by taking the sum from j=0 to i of all the values in T^\Beta .
+  //
+  // In our implementation:
+  //
+  //   stack_positions_ is approximately A from the paper.  stack_positions_
+  //   tells us, for each address, the rank of the address in the lru stack.
+  //
+  //   lru_stack_ is the stack of addresses, corresponding.  We need to be able
+  //   to erase the ith element from the top of the stack and insert an element
+  //   at the top of the stack. We use an order-statistic tree to implement the
+  //   stack.
+  //
+  //   gamma_ is the stack of critical distances.  It has the same operations
+  //   needed on lru_stack_ and also uses an order-statistic tree.
+  //
+  //   beta_diff_ is a prefix sum tree.  beta_diff_ is kind of the derivative of
+  //   beta_: beta_diff_[i] = beta_[i+1] - beta_[i].
+
   // For each string in lru_stack_, what is it's rank in lru_stack_.
   std::unordered_map<std::string, TimeStamp> stack_positions_;
   // All these arrays are indexed from 0, but the paper indexes from 1.
@@ -310,11 +358,13 @@ class Csa {
   // This is sorted by the negative of the access time, so that the top of the
   // stack is first.
   OrderStatisticTree<TimeStamp, std::string> lru_stack_;
-  TimeStamp timestep_;
+  OrderStatisticTree<TimeStamp, size_t> gamma_;
+  std::unordered_map<size_t, TimeStamp> gamma_inverted_;
+  TimeStamp timestep_; // Used to index items in lru_stack_ and gamma_.
   // Critical markers are are the same as what the paper says, but the indexes
   // are less.  For the paper's M(1) we store in critical_markers_[0].
   std::vector<size_t> critical_markers_;
-  std::vector<size_t> beta_;
+  std::vector<size_t> beta_; // to be deprecated
   PrefixTree<SizetComparesBackward, ptrdiff_t> beta_diff_;
   SizetComparesBackward beta_counter_;
 };
