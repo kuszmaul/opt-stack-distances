@@ -319,37 +319,79 @@ class Csa {
   // set of stacks and as a set of trees.
   //
   //   A is the address trace.  (The paper refers to a tree T^{A}, but all
-  //   that's needed is a hash table.)
+  //     that's needed is a hash table.)
   //
   //   Lambda is the LRU stack (the tree version is called T^\Lambda in the
-  //   paper).
+  //     paper).
   //
   //   Gamma is the sequence of capacities in the order in which they became
-  //   most recently critical.  For example, suppose we have a trace that the
-  //   last 4 accesses with critical stack distances of 3, 7, 3, 5.  That means
-  //   that a cache of size 3 has a hit (but 4 would miss), then 7 has a hit
-  //   (but 8 would miss), then 3 has a hit (but 4 would miss) then 5 has a hit
-  //   (but 6 would miss.)  Then the first 3 elements of Gamma would be {5,3,7}.
+  //     most recently critical.  For example, suppose we have a trace that the
+  //     last 4 accesses with critical stack distances of 3, 7, 3, 5.  That
+  //     means that a cache of size 3 has a hit (but 4 would miss), then 7 has a
+  //     hit (but 8 would miss), then 3 has a hit (but 4 would miss) then 5 has
+  //     a hit (but 6 would miss.)  Then the first 3 elements of Gamma would be
+  //     {5,3,7}.
   //
   //   Beta is the *imbalance function* (the tree version is called T^\Beta).
-  //   The paper essentially describes a prefix sum tree in which Beta(i) is
-  //   calculated by taking the sum from j=0 to i of all the values in T^\Beta .
+  //     The paper essentially describes a prefix sum tree in which Beta(i) is
+  //     calculated by taking the sum from j=0 to i of all the values in
+  //     T^\Beta.
   //
   // In our implementation:
   //
   //   stack_positions_ is approximately A from the paper.  stack_positions_
-  //   tells us, for each address, the rank of the address in the lru stack.
+  //     tells us, for each address, the rank of the address in the lru stack.
   //
   //   lru_stack_ is the stack of addresses, corresponding.  We need to be able
-  //   to erase the ith element from the top of the stack and insert an element
-  //   at the top of the stack. We use an order-statistic tree to implement the
-  //   stack.
+  //     to erase the ith element from the top of the stack and insert an
+  //     element at the top of the stack. We use an order-statistic tree to
+  //     implement the stack.
   //
   //   gamma_ is the stack of critical distances.  It has the same operations
-  //   needed on lru_stack_ and also uses an order-statistic tree.
+  //     needed on lru_stack_ and also uses an order-statistic tree.
   //
-  //   beta_diff_ is a prefix sum tree.  beta_diff_ is kind of the derivative of
-  //   beta_: beta_diff_[i] = beta_[i+1] - beta_[i].
+  //   beta_diff_ is a prefix sum tree.  The tree is indexed by a counter
+  //     (beta_counter_) which increases but compares backwards so that larger
+  //     counters sort earlier in the tree.  The leaves of the trees contained
+  //     signed integers.  Those integers are kind of the derivative of beta_,
+  //     that is, prefix_sum(beta_diff_, i).sum == beta_[i+1] = beta_[i].  (Keep
+  //     in mind that we don't represent beta_ explicitly).  But we need a
+  //     little bit more from beta_.  We need to be able to compute the minimum
+  //     from the paper's equation (2):
+  //
+  //     Z(j) = max { i > j : Beta(i) == 0 }             (Equation 2)
+  //
+  //     We can compute Z(j) using a prefix sum in the beta_diff_ tree.  To do
+  //     this the beta_diff_ prefix sums contain the following components:
+  //
+  //       sum:  The sum of the beta_diff_ leaves in the subtree.
+  //
+  //       relative_depth: If you start at 0 at the left edge of the subtree,
+  //         how deep does the partial sum get?
+  //
+  //       distance_from_min: How many values since the rightmost instance of
+  //         the deepest point.
+  //
+  //     When combining two prefix sums a and b we have
+  //
+  //       combined.sum = a.sum + b.sum
+  //
+  //       combined.relative_depth =
+  //           min(a.relative_depth, a.sum + b.relative_depth)
+  //
+  //       combined.distance_from_min =
+  //           (a.relative_depth > a.sum + b.relative_depth)
+  //           ? a.distance_from_min + b.subtree_size
+  //           : b.distance_from_min.
+  //
+  //     Given those prefix sums, we can calculate Z(j) as follows:
+  //
+  //       1) Construct the prefix_sum for the elements 0 to j.
+  //
+  //       2a) If the relative_depth equals 0, then we want the
+  //           distance_from_min..
+  //
+  //       2b) Otherwise, there are no 0 (which I don't think can happen).
 
   // For each string in lru_stack_, what is it's rank in lru_stack_.
   std::unordered_map<std::string, TimeStamp> stack_positions_;
