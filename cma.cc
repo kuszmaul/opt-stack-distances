@@ -291,13 +291,23 @@ class Csa {
         std::cout << "-1 beta_diff_=" << beta_diff_ << std::endl;
       }
       // BilardiEkPa17 EQuation 20:
+      //   Shift Beta[i] to Beta[i+1] for i < D
       //   Increment Beta[i] for all i > D
       //   where D is the LRU stack depth, represented by *depth here.
       {
-        std::cout << "Incrementng beta_diff_[" << *depth << "]" << std::endl;
+        beta_diff_.InsertOrAssign(beta_counter_++, 0);
+        std::cout << "Incrementing beta_diff_[" << *depth << "]" << std::endl;
+        const auto [k1, v1] = beta_diff_.Select(*depth);
+        beta_diff_.Erase(k1);
+        std::cout << "erased slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
         const auto [k, v] = beta_diff_.Select(*depth);
-        beta_diff_.InsertOrAssign(k, v+1);
-        std::cout << "+1 beta_diff_=" << beta_diff_ << std::endl;
+        beta_diff_.InsertOrAssign(k, v1 + v + 1);
+        std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
+        {
+          auto final_sum = beta_diff_.SelectPrefix(beta_diff_.Size() - 1);
+          assert(final_sum.sum == 0);
+        }
+        assert(beta_diff_.Size() == lru_stack_.Size());
       }
       most_recent_z_ = z;
       most_recent_dopt_ = depth_opt;
