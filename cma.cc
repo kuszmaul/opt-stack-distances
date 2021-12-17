@@ -233,10 +233,13 @@ struct BetaPrefix {
 
 class Csa {
  public:
+  bool verbose = true;
   std::pair</*OPT depth*/std::optional<size_t>,
             /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
-    std::cout << std::endl << "CSA access " << t << std::endl;
-    std::cout << *this << std::endl;
+    if (verbose) {
+      std::cout << std::endl << "CSA access " << t << std::endl;
+      std::cout << *this << std::endl;
+    }
     const std::optional<size_t> depth = FindDepth(t);
     most_recent_z_ = std::nullopt;
     most_recent_dopt_ = std::nullopt;
@@ -256,10 +259,10 @@ class Csa {
       // state remains the same
       return {0, 0};
     } else {
-      std::cout << "D=" << *depth << std::endl;
+      if (verbose) std::cout << "D=" << *depth << std::endl;
       const size_t z = FindZ(*depth);
       const size_t depth_opt = FindDepthOpt(z);
-      std::cout << "depth_opt=" << depth_opt << std::endl;
+      if (verbose) std::cout << "depth_opt=" << depth_opt << std::endl;
       size_t M_star = critical_markers_[depth_opt];
       RotateLruStack(*depth);
       {
@@ -275,20 +278,22 @@ class Csa {
         if (critical_markers_[i] < depth) ++critical_markers_[i];
       }
       critical_markers_[depth_opt] = 1;
-      std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
+      if (verbose) std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
       RecomputeBeta();
-      std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
-      std::cout << "depth_opt=" << depth_opt << std::endl;
-      std::cout << "beta_diff_=" << beta_diff_ << std::endl;
+      if (verbose) {
+        std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
+        std::cout << "depth_opt=" << depth_opt << std::endl;
+        std::cout << "beta_diff_=" << beta_diff_ << std::endl;
+      }
       // BilardiEkPa17 Equation 19:
       //   Decrement beta_[i] for all i > M*
       //   where M* = critical_markers_[depth_opt - 1].
       {
-        std::cout << "M*=" << M_star << std::endl;
+        if (verbose) std::cout << "M*=" << M_star << std::endl;
         const auto [k, v] = beta_diff_.Select(M_star);
-        std::cout << "select found k=" << k << std::endl;
+        if (verbose) std::cout << "select found k=" << k << std::endl;
         beta_diff_.InsertOrAssign(k, v-1);
-        std::cout << "-1 beta_diff_=" << beta_diff_ << std::endl;
+        if (verbose) std::cout << "-1 beta_diff_=" << beta_diff_ << std::endl;
       }
       // BilardiEkPa17 EQuation 20:
       //   Shift Beta[i] to Beta[i+1] for i < D
@@ -296,13 +301,13 @@ class Csa {
       //   where D is the LRU stack depth, represented by *depth here.
       {
         beta_diff_.InsertOrAssign(beta_counter_++, 0);
-        std::cout << "Incrementing beta_diff_[" << *depth << "]" << std::endl;
+        if (verbose) std::cout << "Incrementing beta_diff_[" << *depth << "]" << std::endl;
         const auto [k1, v1] = beta_diff_.Select(*depth);
         beta_diff_.Erase(k1);
-        std::cout << "erased slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
+        if (verbose) std::cout << "erased slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
         const auto [k, v] = beta_diff_.Select(*depth);
         beta_diff_.InsertOrAssign(k, v1 + v + 1);
-        std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
+        if (verbose) std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
         {
           auto final_sum = beta_diff_.SelectPrefix(beta_diff_.Size() - 1);
           assert(final_sum.sum == 0);
@@ -363,7 +368,7 @@ class Csa {
     for (size_t i = 0; i < depth; ++i) {
       if (beta_[i] == 0) result = i;
     }
-    std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
+    if (verbose) std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
     return result;
   }
   size_t FindDepthOpt(size_t z) const {
@@ -523,8 +528,8 @@ class CsaAndCma {
             /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
     auto cma_result = cma_.Access(t);
     auto csa_result = csa_.Access(t);
-    std::cout << "cma result = " << cma_result << std::endl;
-    std::cout << "csa result = " << csa_result << std::endl;
+    //std::cout << "cma result = " << cma_result << std::endl;
+    //std::cout << "csa result = " << csa_result << std::endl;
     assert(cma_result == csa_result);
     csa_.Validate();
     return csa_result;
@@ -624,17 +629,20 @@ class Opt {
       }
       opt_stack.insert(opt_stack.begin(), {address, next});
       // One pass of insertion sort.  But the item in location 0 must stay
-      for (size_t i = 1; i + 1 < opt_stack.size() && i + 1 < count; ++i) {
+      if (0) std::cout << "size=" << opt_stack.size() << " count=" << count << std::endl;
+      for (size_t i = 1; i + 1 < opt_stack.size() && i < count; ++i) {
+        if (0) std::cout << " consider swap " << i << " with " << i + 1 << std::endl;
         if ((opt_stack[i].second
              && opt_stack[i+1].second
              && *opt_stack[i].second > *opt_stack[i+1].second)
             || (!opt_stack[i].second
                 && opt_stack[i+1].second)) {
+          if (0) std::cout << " swap  " << i << " with " << i + 1 << std::endl;
           std::swap(opt_stack[i], opt_stack[i+1]);
         }
       }
-      std::cout << "OPT Access " << address << " " << result.back()
-                << " stack=" << opt_stack << std::endl;
+      if (1) std::cout << "OPT Access " << address << " " << result.back()
+                       << " stack=" << opt_stack << std::endl;
     }
     return result;
   }
@@ -645,6 +653,40 @@ class Opt {
   std::unordered_map<std::string, size_t> prev_access_;
 };
 
+
+void randomtest() {
+  std::vector<std::string> addresses = {"a", "b", "c"};
+  std::vector<std::string> trace;
+  Opt opt;
+  Csa csa;
+  Cma cma;
+  std::vector<std::optional<size_t>> csa_results, cma_results;
+  for (size_t i = 0; i < 12; ++i) {
+    if (i % 20 == 0) {
+      addresses.push_back(std::to_string(addresses.size()));
+    }
+    std::string a = addresses[static_cast<size_t>(random()) % addresses.size()];;
+    if (1) std::cout << "a(" << a << ")" << std::endl;
+    opt.Access(a);
+    if (0) {
+      auto [opt_depth, lru_depth] = csa.Access(a);
+      csa_results.push_back(opt_depth);
+    }
+    {
+      auto [opt_depth, lru_depth] = cma.Access(a);
+      cma_results.push_back(opt_depth);
+      std::cout << cma << std::endl;
+    }
+  }
+  std::vector<std::optional<size_t>> opt_results = opt.GetStackDepths();
+  if (1) {
+    std::cout << "cma results = " << cma_results << std::endl;
+    std::cout << "csa results = " << csa_results << std::endl;
+    std::cout << "opt results = " << opt_results << std::endl;
+  }
+  assert(cma_results == opt_results);
+  if (0) assert(csa_results == opt_results);
+}
 
 int main() {
   TestBeta();
@@ -683,4 +725,5 @@ int main() {
     cma.Validate();
     ++time;
   }
+  randomtest();
 }
