@@ -14,6 +14,8 @@
 
 #include "ost.h"
 
+static const bool verbose = false;
+
 template <class T, class U>
 std::ostream& operator<<(std::ostream &os, const std::pair<T, U> &v);
 
@@ -98,14 +100,14 @@ class Cma {
       // state remains the same
       return {0, 0};
     } else {
-      std::cout << "D=" << *depth << std::endl;
+      if (verbose) std::cout << "D=" << *depth << std::endl;
       const size_t z = FindZ(*depth);
-      std::cout << "z=" << z << std::endl;
+      if (verbose) std::cout << "z=" << z << std::endl;
       const size_t depth_opt = FindDepthOpt(z);
-      std::cout << "depth_opt=" << depth_opt << std::endl;
+      if (verbose) std::cout << "depth_opt=" << depth_opt << std::endl;
       RotateLruStack(*depth);
       for (size_t i = 1; i < critical_markers_.size(); ++i) {
-        if (critical_markers_[i] < depth) ++critical_markers_[i];
+        if (critical_markers_[i] <= depth) ++critical_markers_[i];
       }
       critical_markers_[depth_opt] = 1;
       //std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
@@ -233,7 +235,6 @@ struct BetaPrefix {
 
 class Csa {
  public:
-  bool verbose = true;
   std::pair</*OPT depth*/std::optional<size_t>,
             /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
     if (verbose) {
@@ -588,14 +589,14 @@ static void TestABCDEB() {
   CHECK_EQ(cma.GetM(), VI({5, 4, 3, 2, 1}));
   CHECK_EQ(cma.GetBeta(), VI({0, 0, 0, 0, 0}));
 
-  std::cout << cma << std::endl;
+  //std::cout << cma << std::endl;
   CHECK_EQ(cma.Access("b"), TI({1ul, 3ul}));
   // In the original paper, this would be 3, but since we are using 1-based
   // indexing it's two.
   CHECK_EQ(cma.GetMostRecentZ(), std::optional<size_t>(2ul));
   CHECK_EQ(cma.GetMostRecentDopt(), std::optional<size_t>(1ul));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"b", "e", "d", "c", "a"}));
-  CHECK_EQ(cma.GetM(), VI({5, 1, 3, 3, 2}));
+  CHECK_EQ(cma.GetM(), VI({5, 1, 4, 3, 2}));
 }
 
 class Opt {
@@ -641,8 +642,8 @@ class Opt {
           std::swap(opt_stack[i], opt_stack[i+1]);
         }
       }
-      if (1) std::cout << "OPT Access " << address << " " << result.back()
-                       << " stack=" << opt_stack << std::endl;
+      if (verbose) std::cout << "OPT Access " << address << " " << result.back()
+                             << " stack=" << opt_stack << std::endl;
     }
     return result;
   }
@@ -655,37 +656,39 @@ class Opt {
 
 
 void randomtest() {
-  std::vector<std::string> addresses = {"a", "b", "c"};
-  std::vector<std::string> trace;
-  Opt opt;
-  Csa csa;
-  Cma cma;
-  std::vector<std::optional<size_t>> csa_results, cma_results;
-  for (size_t i = 0; i < 12; ++i) {
-    if (i % 20 == 0) {
-      addresses.push_back(std::to_string(addresses.size()));
+  for (size_t trial = 0; trial < 10; ++trial) {
+    std::vector<std::string> addresses = {"a", "b", "c"};
+    std::vector<std::string> trace;
+    Opt opt;
+    Csa csa;
+    Cma cma;
+    std::vector<std::optional<size_t>> csa_results, cma_results;
+    for (size_t i = 0; i < 1000; ++i) {
+      if (i % 20 == 0) {
+        addresses.push_back(std::to_string(addresses.size()));
+      }
+      std::string a = addresses[static_cast<size_t>(random()) % addresses.size()];;
+      if (verbose) std::cout << "a(" << a << ")" << std::endl;
+      opt.Access(a);
+      if (0) {
+        auto [opt_depth, lru_depth] = csa.Access(a);
+        csa_results.push_back(opt_depth);
+      }
+      {
+        auto [opt_depth, lru_depth] = cma.Access(a);
+        cma_results.push_back(opt_depth);
+        //std::cout << cma << std::endl;
+      }
     }
-    std::string a = addresses[static_cast<size_t>(random()) % addresses.size()];;
-    if (1) std::cout << "a(" << a << ")" << std::endl;
-    opt.Access(a);
-    if (0) {
-      auto [opt_depth, lru_depth] = csa.Access(a);
-      csa_results.push_back(opt_depth);
+    std::vector<std::optional<size_t>> opt_results = opt.GetStackDepths();
+    if (verbose) {
+      std::cout << "cma results = " << cma_results << std::endl;
+      std::cout << "csa results = " << csa_results << std::endl;
+      std::cout << "opt results = " << opt_results << std::endl;
     }
-    {
-      auto [opt_depth, lru_depth] = cma.Access(a);
-      cma_results.push_back(opt_depth);
-      std::cout << cma << std::endl;
-    }
+    assert(cma_results == opt_results);
+    if (0) assert(csa_results == opt_results);
   }
-  std::vector<std::optional<size_t>> opt_results = opt.GetStackDepths();
-  if (1) {
-    std::cout << "cma results = " << cma_results << std::endl;
-    std::cout << "csa results = " << csa_results << std::endl;
-    std::cout << "opt results = " << opt_results << std::endl;
-  }
-  assert(cma_results == opt_results);
-  if (0) assert(csa_results == opt_results);
 }
 
 int main() {
@@ -716,11 +719,11 @@ int main() {
   Csa cma;
   size_t time = 0;
   for (auto &[address, depth] : trace) {
-    std::cout << "Accessing " << address << std::endl;
+    //std::cout << "Accessing " << address << std::endl;
     auto [c, lru_depth] = cma.Access(address);
     assert(c == opt_result[time]);
-    std::cout << "a=" << address << " c=" << c << std::endl << cma << std::endl;
-    std::cout << std::endl;
+    //std::cout << "a=" << address << " c=" << c << std::endl << cma << std::endl;
+    // std::cout << std::endl;
     assert(depth == SIZE_MAX || depth == c);
     cma.Validate();
     ++time;
