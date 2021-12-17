@@ -15,6 +15,12 @@
 #include "ost.h"
 
 template <class T>
+std::ostream& operator<<(std::ostream &os, const std::optional<T> &v) {
+  if (v) return os << *v;
+  else return os << "nullopt";
+}
+
+template <class T>
 std::ostream& operator<<(std::ostream &os, const std::vector<T> &v) {
   os << "{";
   bool first = true;
@@ -26,9 +32,10 @@ std::ostream& operator<<(std::ostream &os, const std::vector<T> &v) {
   return os << "}";
 }
 
-std::ostream& operator<<(std::ostream &os, const std::tuple<size_t, size_t> &v) {
-  auto [ c, lru_depth ] = v;
-  return os << "{" << c << ", " << lru_depth << "}";
+template <class T, class U>
+std::ostream& operator<<(std::ostream &os, const std::pair<T, U> &v) {
+  const auto& [a, b] = v;
+  return os << "{" << a << ", " << b << "}";
 }
 
 std::ostream& operator<<(std::ostream& os, const std::optional<size_t> &v) {
@@ -73,7 +80,8 @@ void ComputeBeta(const std::vector<size_t> &critical_markers,
 
 class Cma {
  public:
-  std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+  std::pair</*OPT depth*/std::optional<size_t>,
+            /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
     const std::optional<size_t> depth = FindDepth(t);
     most_recent_z_ = std::nullopt;
     most_recent_dopt_ = std::nullopt;
@@ -82,7 +90,7 @@ class Cma {
       IncrementAllCriticalMarkers();
       critical_markers_.push_back(1);
       RecomputeBeta();
-      return {lru_stack_.size(), lru_stack_.size()};
+      return {std::nullopt, std::nullopt};
     } else if (depth == 0) {
       // state remains the same
       return {0, 0};
@@ -195,7 +203,7 @@ struct BetaPrefix {
   BetaPrefix() :BetaPrefix(0) {}
   explicit BetaPrefix(ptrdiff_t increment)
       :sum(increment), relative_depth(increment < 0 ? increment : 0),
-       distance_from_min(increment < 0 ? 0 : 1), tree_size(1) {}
+       distance_from_min(increment <= 0 ? 0 : 1), tree_size(0) {}
   BetaPrefix operator+(const BetaPrefix &b) const {
     BetaPrefix result;
     result.sum = sum + b.sum;
@@ -205,7 +213,7 @@ struct BetaPrefix {
         (relative_depth > sum + b.relative_depth)
         ? (distance_from_min + b.tree_size)
         : b.distance_from_min;
-    result.tree_size = tree_size + b.tree_size;
+    result.tree_size = 1 + tree_size + b.tree_size;
     return result;
   }
 
@@ -222,7 +230,8 @@ struct BetaPrefix {
 
 class Csa {
  public:
-  std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+  std::pair</*OPT depth*/std::optional<size_t>,
+            /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
     std::cout << std::endl << "CSA access " << t << std::endl;
     std::cout << *this << std::endl;
     const std::optional<size_t> depth = FindDepth(t);
@@ -239,16 +248,16 @@ class Csa {
       critical_markers_.push_back(1);
       RecomputeBeta();
       beta_diff_.InsertOrAssign(beta_counter_++, 0);
-      return {size, size};
+      return {std::nullopt, std::nullopt};
     } else if (depth == 0) {
       // state remains the same
       return {0, 0};
     } else {
       std::cout << "D=" << *depth << std::endl;
       const size_t z = FindZ(*depth);
-      std::cout << "z=" << z << std::endl;
       const size_t depth_opt = FindDepthOpt(z);
       std::cout << "depth_opt=" << depth_opt << std::endl;
+      size_t M_star = critical_markers_[depth_opt];
       RotateLruStack(*depth);
       {
         auto it = gamma_inverted_.find(depth_opt);
@@ -268,18 +277,24 @@ class Csa {
       std::cout << "Just after  computing beta:" << std::endl << *this << std::endl;
       std::cout << "depth_opt=" << depth_opt << std::endl;
       std::cout << "beta_diff_=" << beta_diff_ << std::endl;
+      // BilardiEkPa17 Equation 19:
+      //   Decrement beta_[i] for all i > M*
+      //   where M* = critical_markers_[depth_opt - 1].
       {
-        const auto [k, v] = beta_diff_.Select(*depth);
-        beta_diff_.InsertOrAssign(k, v+1);
-        std::cout << "+1 beta_diff_=" << beta_diff_ << std::endl;
-      }
-      {
-        size_t M_star = critical_markers_[depth_opt - 1];
-        std::cout << "M_star=" << M_star << std::endl;
-        const auto [k, v] = beta_diff_.Select(M_star - 1);
+        std::cout << "M*=" << M_star << std::endl;
+        const auto [k, v] = beta_diff_.Select(M_star);
         std::cout << "select found k=" << k << std::endl;
         beta_diff_.InsertOrAssign(k, v-1);
         std::cout << "-1 beta_diff_=" << beta_diff_ << std::endl;
+      }
+      // BilardiEkPa17 EQuation 20:
+      //   Increment Beta[i] for all i > D
+      //   where D is the LRU stack depth, represented by *depth here.
+      {
+        std::cout << "Incrementng beta_diff_[" << *depth << "]" << std::endl;
+        const auto [k, v] = beta_diff_.Select(*depth);
+        beta_diff_.InsertOrAssign(k, v+1);
+        std::cout << "+1 beta_diff_=" << beta_diff_ << std::endl;
       }
       most_recent_z_ = z;
       most_recent_dopt_ = depth_opt;
@@ -335,6 +350,7 @@ class Csa {
     for (size_t i = 0; i < depth; ++i) {
       if (beta_[i] == 0) result = i;
     }
+    std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
     return result;
   }
   size_t FindDepthOpt(size_t z) const {
@@ -490,7 +506,8 @@ static void TestBeta() {
 
 class CsaAndCma {
  public:
-  std::tuple</*OPT depth*/size_t, /*LRU depth*/size_t> Access(const std::string &t) {
+  std::pair</*OPT depth*/std::optional<size_t>,
+            /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
     auto cma_result = cma_.Access(t);
     auto csa_result = csa_.Access(t);
     std::cout << "cma result = " << cma_result << std::endl;
@@ -523,32 +540,32 @@ class CsaAndCma {
   Csa csa_;
 };
 
-using TI = std::tuple<size_t, size_t>;
+using TI = std::pair<std::optional<size_t>, std::optional<size_t>>;
 using VI = std::vector<size_t>;
 
 static void TestABCDEB() {
   CsaAndCma cma;
-  CHECK_EQ(cma.Access("a"), TI({1ul, 1ul}));
+  CHECK_EQ(cma.Access("a"), TI({{}, {}}));
   CHECK_EQ(cma.GetL(), {"a"});
   CHECK_EQ(cma.GetM(), {1});
   CHECK_EQ(cma.GetBeta(), {0});
 
-  CHECK_EQ(cma.Access("b"), TI({2ul, 2ul}));
+  CHECK_EQ(cma.Access("b"), TI({{}, {}}));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"b", "a"}));
   CHECK_EQ(cma.GetM(), VI({2, 1}));
   CHECK_EQ(cma.GetBeta(), VI({0, 0}));
 
-  CHECK_EQ(cma.Access("c"), TI({3ul, 3ul}));
+  CHECK_EQ(cma.Access("c"), TI({{}, {}}));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"c", "b", "a"}));
   CHECK_EQ(cma.GetM(), VI({3, 2, 1}));
   CHECK_EQ(cma.GetBeta(), VI({0, 0, 0}));
 
-  CHECK_EQ(cma.Access("d"), TI({4ul, 4ul}));
+  CHECK_EQ(cma.Access("d"), TI({{}, {}}));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"d", "c", "b", "a"}));
   CHECK_EQ(cma.GetM(), VI({4, 3, 2, 1}));
   CHECK_EQ(cma.GetBeta(), VI({0, 0, 0, 0}));
 
-  CHECK_EQ(cma.Access("e"), TI({5ul, 5ul}));
+  CHECK_EQ(cma.Access("e"), TI({{}, {}}));
   CHECK_EQ(cma.GetL(), std::vector<std::string>({"e", "d", "c", "b", "a"}));
   CHECK_EQ(cma.GetM(), VI({5, 4, 3, 2, 1}));
   CHECK_EQ(cma.GetBeta(), VI({0, 0, 0, 0, 0}));
@@ -566,28 +583,29 @@ static void TestABCDEB() {
 int main() {
   TestBeta();
   TestABCDEB();
-  const std::vector<std::pair<std::string, size_t>> trace =
-      {{"a", 1}, // OPT=a
-       {"b", 2}, // OPT=b a
-       {"c", 3}, // OPT=c b a  (c must be in cache 0, but is still before a)
+  const std::vector<std::pair<std::string, std::optional<size_t>>> trace =
+      {{"a", {}}, // OPT=a
+       {"b", {}}, // OPT=b a
+       {"c", {}}, // OPT=c b a  (c must be in cache 0, but is still before a)
        // OPT=b c a   (c is next accessed after b)
-       {"d", 4}, // OPT=d b c a   (d is in cache0, but b beats c, and then c beats a)
-       {"e", 5}, // OPT=e b c a d
+       {"d", {}}, // OPT=d b c a   (d is in cache0, but b beats c, and then c beats a)
+       {"e", {}}, // OPT=e b c a d
        {"b", 1}, // OPT=b e c a d  (b moves up, and then e doesn't have to fight c)
        // Something goes wrong in my CMA implementation here.
        {"c", 2}, // OPT=c b e a d  (c moves up, b beats e, e doesn't have to fight a)
-       {"f", 6}, // OPT=f b e a d c (f moves up, c moves out (but could have had e move out)
+       {"f", {}}, // OPT=f b e a d c (f moves up, c moves out (but could have had e move out)
        {"a", 3}, // OPT=a b e f d c
        {"b", 1}, // OPT=b a e f d c
-       {"g", 7}, // OPT=g a e f d c b
+       {"g", {}}, // OPT=g a e f d c b
        {"d", 4}  // OPT=d a e f g c b
       };
-  Cma cma;
+  Csa cma;
   for (auto &[address, depth] : trace) {
     std::cout << "Accessing " << address << std::endl;
     auto [c, lru_depth] = cma.Access(address);
     std::cout << "a=" << address << " c=" << c << std::endl << cma << std::endl;
     std::cout << std::endl;
     assert(depth == SIZE_MAX || depth == c);
+    cma.Validate();
   }
 }
