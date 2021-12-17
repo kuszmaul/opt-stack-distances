@@ -14,6 +14,9 @@
 
 #include "ost.h"
 
+template <class T, class U>
+std::ostream& operator<<(std::ostream &os, const std::pair<T, U> &v);
+
 template <class T>
 std::ostream& operator<<(std::ostream &os, const std::optional<T> &v) {
   if (v) return os << *v;
@@ -580,6 +583,59 @@ static void TestABCDEB() {
   CHECK_EQ(cma.GetM(), VI({5, 1, 3, 3, 2}));
 }
 
+class Opt {
+ public:
+  void Access(std::string a) {
+    auto prev = prev_access_.find(a);
+    if (prev != prev_access_.end()) {
+      trace_[prev->second].second = timestep_;
+    }
+    trace_.push_back({a, std::nullopt});
+    prev_access_[a] = timestep_;
+    ++timestep_;
+
+  }
+  std::vector<std::optional<size_t>> GetStackDepths() const {
+    std::vector<std::optional<size_t>> result;
+    std::vector<std::pair<std::string, std::optional<size_t>>> opt_stack;
+    for (size_t time = 0; time < trace_.size(); ++time) {
+      auto [address, next] = trace_[time];
+      auto it = opt_stack.begin();
+      size_t count = 0;
+      for (; it != opt_stack.end(); ++it, ++count) {
+        if (it->first == address) break;
+      }
+      if (it == opt_stack.end()) {
+        ++count;
+        result.push_back(std::nullopt);
+      } else {
+        result.push_back(count);
+        opt_stack.erase(it);
+      }
+      opt_stack.insert(opt_stack.begin(), {address, next});
+      // One pass of insertion sort.  But the item in location 0 must stay
+      for (size_t i = 1; i + 1 < opt_stack.size() && i + 1 < count; ++i) {
+        if ((opt_stack[i].second
+             && opt_stack[i+1].second
+             && *opt_stack[i].second > *opt_stack[i+1].second)
+            || (!opt_stack[i].second
+                && opt_stack[i+1].second)) {
+          std::swap(opt_stack[i], opt_stack[i+1]);
+        }
+      }
+      std::cout << "OPT Access " << address << " " << result.back()
+                << " stack=" << opt_stack << std::endl;
+    }
+    return result;
+  }
+ private:
+  // The second element of the pair is the next access time.
+  std::vector<std::pair<std::string, std::optional<size_t>>> trace_;
+  size_t timestep_ = 0;
+  std::unordered_map<std::string, size_t> prev_access_;
+};
+
+
 int main() {
   TestBeta();
   TestABCDEB();
@@ -593,19 +649,28 @@ int main() {
        {"b", 1}, // OPT=b e c a d  (b moves up, and then e doesn't have to fight c)
        // Something goes wrong in my CMA implementation here.
        {"c", 2}, // OPT=c b e a d  (c moves up, b beats e, e doesn't have to fight a)
-       {"f", {}}, // OPT=f b e a d c (f moves up, c moves out (but could have had e move out)
-       {"a", 3}, // OPT=a b e f d c
-       {"b", 1}, // OPT=b a e f d c
-       {"g", {}}, // OPT=g a e f d c b
-       {"d", 4}  // OPT=d a e f g c b
+       {"f", {}}, // OPT=f b c a d e (f moves up, e moves out (but could have had c move out)
+       {"a", 3}, // OPT=a b f c d e
+       {"b", 1}, // OPT=b a f c d e
+       {"g", {}},// OPT=g b a f d c e
+       {"d", 4}  // OPT=d g b a f c e
       };
+  Opt opt;
+  for (auto &[address, depth] : trace) {
+    opt.Access(address);
+  }
+  const std::vector<std::optional<size_t>> opt_result = opt.GetStackDepths();
+  assert(opt_result.size() == trace.size());
   Csa cma;
+  size_t time = 0;
   for (auto &[address, depth] : trace) {
     std::cout << "Accessing " << address << std::endl;
     auto [c, lru_depth] = cma.Access(address);
+    assert(c == opt_result[time]);
     std::cout << "a=" << address << " c=" << c << std::endl << cma << std::endl;
     std::cout << std::endl;
     assert(depth == SIZE_MAX || depth == c);
     cma.Validate();
+    ++time;
   }
 }
