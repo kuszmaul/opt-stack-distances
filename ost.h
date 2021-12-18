@@ -77,7 +77,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
   }
   std::ostream& PrintTreeStructure(std::ostream& out) const {
     out << std::endl << "{";
-    return PrintNodeStructure(out, root_, true, 0) << "}" << std::endl;
+    return PrintNodeStructure(out, root_, true, 0) << "}";
   }
  private:
   static std::ostream& PrintNodeStructure(std::ostream& out,
@@ -90,7 +90,7 @@ template<class K, class V, class Combiner = NullCombiner<V>>
         need_newline = true;
       }
       if (need_newline) out << std::endl << std::string(depth, ' ');
-      out << node->k << ":" << node->v << ":" << node->subtree_value;
+      out << node->pair.first << ":" << node->pair.second << ":" << node->subtree_value;
       if (node->right) {
         PrintNodeStructure(out, node->right, true, depth+1);
       }

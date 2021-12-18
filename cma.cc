@@ -208,31 +208,80 @@ struct BetaPrefix {
   static constexpr bool IsPrintable = true;
   BetaPrefix() :BetaPrefix(0) {}
   explicit BetaPrefix(ptrdiff_t increment)
-      :sum(increment), relative_depth(increment < 0 ? increment : 0),
-       distance_from_min(increment <= 0 ? 0 : 1), tree_size(0) {}
+      :sum(increment), min(increment),
+       distance_from_min(increment <= 0 ? 0 : 1), tree_size(1) {}
   BetaPrefix operator+(const BetaPrefix &b) const {
     BetaPrefix result;
     result.sum = sum + b.sum;
-    result.relative_depth = std::max(relative_depth,
-                                     sum + b.relative_depth);
+    result.min = std::min(min, sum + b.min);
     result.distance_from_min =
-        (relative_depth > sum + b.relative_depth)
+        (min < sum + b.min)
         ? (distance_from_min + b.tree_size)
         : b.distance_from_min;
-    result.tree_size = 1 + tree_size + b.tree_size;
+    result.tree_size = tree_size + b.tree_size;
     return result;
   }
 
   friend std::ostream& operator<<(std::ostream& out, const BetaPrefix& n) {
-    return out << "{s=" << n.sum << " rd=" << n.relative_depth << " dmin="
+    return out << "{s=" << n.sum << " min=" << n.min << " dmin="
                << n.distance_from_min << " ts=" << n.tree_size << "}";
+  }
+  bool operator==(const BetaPrefix &other) {
+    return sum == other.sum && min == other.min
+        && distance_from_min == other.distance_from_min
+        && tree_size == other.tree_size;
   }
 
   ptrdiff_t sum;
-  ptrdiff_t relative_depth;
+  ptrdiff_t min;
   size_t    distance_from_min;
   size_t    tree_size;
 };
+
+void TestBetaPrefix() {
+  // Beta is {0,1,1,0,0}
+  const BetaPrefix a(0);
+  const BetaPrefix b(1);
+  const BetaPrefix c(0);
+  const BetaPrefix d(-1);
+  const BetaPrefix e(0);
+
+  const BetaPrefix sum1 = a + b;
+  assert(sum1.sum == 1);
+  assert(sum1.min == 0);
+  assert(sum1.distance_from_min == 1);
+  assert(sum1.tree_size == 2);
+
+  const BetaPrefix sum2 = sum1 + c;
+  assert(sum2.sum == 1);
+  assert(sum2.min == 0);
+  assert(sum2.distance_from_min == 2);
+  assert(sum2.tree_size == 3);
+
+  const BetaPrefix sum3 = sum2 + d;
+  assert(sum3.sum == 0);
+  assert(sum3.min == 0);
+  assert(sum3.distance_from_min == 0);
+  assert(sum3.tree_size == 4);
+
+  const BetaPrefix sum4 = sum3 + e;
+  assert(sum4.sum == 0);
+  assert(sum4.min == 0);
+  assert(sum4.distance_from_min == 0);
+  assert(sum4.tree_size == 5);
+
+  // Now check associativity.
+  assert((a + b) + c == sum2);
+  assert(a + (b + c) == sum2);
+  assert(((a + b) + c) + d == sum3);
+  assert((a + (b + c)) + d == sum3);
+  assert((a + b) + (c + d) == sum3);
+  assert(a + (b + (c + d)) == sum3);
+  assert(a + ((b + c) + d) == sum3);
+
+
+}
+
 
 class Csa {
  public:
@@ -373,11 +422,22 @@ class Csa {
     for (size_t &v : critical_markers_) ++v;
   }
   size_t FindZ(size_t depth) const {
+    // Note: depth + 1 = the paper's Delta_t.
+    if (verbose) {
+      std::cout << "FindZ(" << depth << ") (delta=" << depth + 1 << ")" << std::endl;
+      std::cout << "beta=" << beta_ << std::endl;
+      std::cout << "beta_diff=" << beta_diff_ << std::endl;
+      std::cout << "beta_diff internals:" << std::endl;
+      beta_diff_.PrintTreeStructure(std::cout) << std::endl;
+    }
     size_t result = 0;
     for (size_t i = 0; i < depth; ++i) {
       if (beta_[i] == 0) result = i;
     }
     if (verbose) std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
+    BetaPrefix prefix = beta_diff_.SelectPrefix(depth - 1);
+    if (verbose) std::cout << "beta_prefix=" << prefix << std::endl;
+    assert(result == prefix.tree_size - prefix.distance_from_min - 1);
     return result;
   }
   size_t FindDepthOpt(size_t z) const {
@@ -671,7 +731,7 @@ void randomtest() {
     Csa csa;
     Cma cma;
     std::vector<std::optional<size_t>> csa_results, cma_results;
-    for (size_t i = 0; i < (verbose ? 20 : 1000); ++i) {
+    for (size_t i = 0; i < (verbose ? 20 : 80); ++i) {
       if (i % 20 == 0) {
         addresses.push_back(std::to_string(addresses.size()));
       }
@@ -701,6 +761,7 @@ void randomtest() {
 
 int main() {
   TestBeta();
+  TestBetaPrefix();
   TestABCDEB();
   const std::vector<std::pair<std::string, std::optional<size_t>>> trace =
       {{"a", {}}, // OPT=a
