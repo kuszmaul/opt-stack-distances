@@ -15,6 +15,7 @@
 #include "ost.h"
 
 static const bool verbose = false;
+static const bool expensive = true;
 
 template <class T, class U>
 std::ostream& operator<<(std::ostream &os, const std::pair<T, U> &v);
@@ -237,7 +238,7 @@ class Csa {
  public:
   std::pair</*OPT depth*/std::optional<size_t>,
             /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
-    Validate();
+    if (expensive) Validate();
     if (verbose) {
       std::cout << std::endl << "CSA access " << t << std::endl;
       std::cout << *this << std::endl;
@@ -277,7 +278,6 @@ class Csa {
         gamma_.InsertOrAssign(timestep_, depth_opt);
       }
       ++timestep_;
-      if (verbose) std::cout << "++ critical markers <= " << depth << std::endl;
       for (size_t i = 1; i < critical_markers_.size(); ++i) {
         if (critical_markers_[i] <= depth) ++critical_markers_[i];
       }
@@ -307,7 +307,6 @@ class Csa {
         if (verbose) std::cout << "Shifted beta_diff_=" << beta_diff_ << std::endl;
         if (verbose) std::cout << "Incrementing beta_diff_[" << *depth << "] Delta=" << *depth + 1 << std::endl;
         const auto [k1, v1] = beta_diff_.Select(*depth + 1);
-        if (verbose) std::cout << "erasing key " << k1 << std::endl;
         beta_diff_.Erase(k1);
         if (verbose) std::cout << "erased slot " << " beta_diff_=" << beta_diff_ << std::endl;
         if (*depth + 1 < beta_diff_.Size()) {
@@ -315,7 +314,7 @@ class Csa {
           beta_diff_.InsertOrAssign(k, v1 + v + 1);
           if (verbose) std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
         } else {
-          if (verbose) std::cout << "Just let the tail fall off" << std::endl;
+          if (verbose) std::cout << "Just let the tail fall off:" << beta_diff_ << std::endl;
         }
         {
           auto final_sum = beta_diff_.SelectPrefix(beta_diff_.Size() - 1);
@@ -325,7 +324,7 @@ class Csa {
       }
       most_recent_z_ = z;
       most_recent_dopt_ = depth_opt;
-      Validate();
+      if (expensive) Validate();
       return {depth_opt, *depth};
     }
   }
@@ -378,11 +377,7 @@ class Csa {
     for (size_t i = 0; i < depth; ++i) {
       if (beta_[i] == 0) result = i;
     }
-    if (verbose) {
-      std::cout << "depth = " << depth << " beta=" << beta_ << std::endl;
-      std::cout << "betadiff=" << beta_diff_ << std::endl;
-      std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
-    }
+    if (verbose) std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
     return result;
   }
   size_t FindDepthOpt(size_t z) const {
@@ -676,7 +671,7 @@ void randomtest() {
     Csa csa;
     Cma cma;
     std::vector<std::optional<size_t>> csa_results, cma_results;
-    for (size_t i = 0; i < 1000; ++i) {
+    for (size_t i = 0; i < (verbose ? 20 : 1000); ++i) {
       if (i % 20 == 0) {
         addresses.push_back(std::to_string(addresses.size()));
       }
