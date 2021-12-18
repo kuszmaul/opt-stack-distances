@@ -237,6 +237,7 @@ class Csa {
  public:
   std::pair</*OPT depth*/std::optional<size_t>,
             /*LRU depth*/std::optional<size_t>> Access(const std::string &t) {
+    Validate();
     if (verbose) {
       std::cout << std::endl << "CSA access " << t << std::endl;
       std::cout << *this << std::endl;
@@ -265,6 +266,7 @@ class Csa {
       const size_t depth_opt = FindDepthOpt(z);
       if (verbose) std::cout << "depth_opt=" << depth_opt << std::endl;
       size_t M_star = critical_markers_[depth_opt];
+      if (verbose) std::cout << "M*=" << M_star << std::endl;
       RotateLruStack(*depth);
       {
         auto it = gamma_inverted_.find(depth_opt);
@@ -275,8 +277,9 @@ class Csa {
         gamma_.InsertOrAssign(timestep_, depth_opt);
       }
       ++timestep_;
+      if (verbose) std::cout << "++ critical markers <= " << depth << std::endl;
       for (size_t i = 1; i < critical_markers_.size(); ++i) {
-        if (critical_markers_[i] < depth) ++critical_markers_[i];
+        if (critical_markers_[i] <= depth) ++critical_markers_[i];
       }
       critical_markers_[depth_opt] = 1;
       if (verbose) std::cout << "Just before computing beta:" << std::endl << *this << std::endl;
@@ -290,7 +293,6 @@ class Csa {
       //   Decrement beta_[i] for all i > M*
       //   where M* = critical_markers_[depth_opt - 1].
       {
-        if (verbose) std::cout << "M*=" << M_star << std::endl;
         const auto [k, v] = beta_diff_.Select(M_star);
         if (verbose) std::cout << "select found k=" << k << std::endl;
         beta_diff_.InsertOrAssign(k, v-1);
@@ -302,13 +304,19 @@ class Csa {
       //   where D is the LRU stack depth, represented by *depth here.
       {
         beta_diff_.InsertOrAssign(beta_counter_++, 0);
-        if (verbose) std::cout << "Incrementing beta_diff_[" << *depth << "]" << std::endl;
-        const auto [k1, v1] = beta_diff_.Select(*depth);
+        if (verbose) std::cout << "Shifted beta_diff_=" << beta_diff_ << std::endl;
+        if (verbose) std::cout << "Incrementing beta_diff_[" << *depth << "] Delta=" << *depth + 1 << std::endl;
+        const auto [k1, v1] = beta_diff_.Select(*depth + 1);
+        if (verbose) std::cout << "erasing key " << k1 << std::endl;
         beta_diff_.Erase(k1);
-        if (verbose) std::cout << "erased slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
-        const auto [k, v] = beta_diff_.Select(*depth);
-        beta_diff_.InsertOrAssign(k, v1 + v + 1);
-        if (verbose) std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
+        if (verbose) std::cout << "erased slot " << " beta_diff_=" << beta_diff_ << std::endl;
+        if (*depth + 1 < beta_diff_.Size()) {
+          const auto [k, v] = beta_diff_.Select(*depth + 1);
+          beta_diff_.InsertOrAssign(k, v1 + v + 1);
+          if (verbose) std::cout << "+1 slot " << *depth << " beta_diff_=" << beta_diff_ << std::endl;
+        } else {
+          if (verbose) std::cout << "Just let the tail fall off" << std::endl;
+        }
         {
           auto final_sum = beta_diff_.SelectPrefix(beta_diff_.Size() - 1);
           assert(final_sum.sum == 0);
@@ -317,6 +325,7 @@ class Csa {
       }
       most_recent_z_ = z;
       most_recent_dopt_ = depth_opt;
+      Validate();
       return {depth_opt, *depth};
     }
   }
@@ -369,7 +378,11 @@ class Csa {
     for (size_t i = 0; i < depth; ++i) {
       if (beta_[i] == 0) result = i;
     }
-    if (verbose) std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
+    if (verbose) {
+      std::cout << "depth = " << depth << " beta=" << beta_ << std::endl;
+      std::cout << "betadiff=" << beta_diff_ << std::endl;
+      std::cout << "FindZ(" << depth << ")" << "=" << result << std::endl;
+    }
     return result;
   }
   size_t FindDepthOpt(size_t z) const {
@@ -670,7 +683,7 @@ void randomtest() {
       std::string a = addresses[static_cast<size_t>(random()) % addresses.size()];;
       if (verbose) std::cout << "a(" << a << ")" << std::endl;
       opt.Access(a);
-      if (0) {
+      {
         auto [opt_depth, lru_depth] = csa.Access(a);
         csa_results.push_back(opt_depth);
       }
@@ -687,7 +700,7 @@ void randomtest() {
       std::cout << "opt results = " << opt_results << std::endl;
     }
     assert(cma_results == opt_results);
-    if (0) assert(csa_results == opt_results);
+    assert(csa_results == opt_results);
   }
 }
 
