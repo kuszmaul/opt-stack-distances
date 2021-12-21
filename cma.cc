@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -14,7 +15,7 @@
 
 #include "ost.h"
 
-static const bool verbose = false;
+static bool verbose = false;
 static const bool expensive = true;
 
 template <class T, class U>
@@ -26,16 +27,26 @@ std::ostream& operator<<(std::ostream &os, const std::optional<T> &v) {
   else return os << "nullopt";
 }
 
-template <class T>
-std::ostream& operator<<(std::ostream &os, const std::vector<T> &v) {
+template <class Container>
+std::ostream& PrintContainer(std::ostream &os, const Container &container) {
   os << "{";
   bool first = true;
-  for (const T &t : v) {
+  for (const auto &t : container) {
     if (!first) os << ", ";
     first = false;
     os << t;
   }
   return os << "}";
+}
+
+template <class T>
+std::ostream& operator<<(std::ostream &os, const std::vector<T> &v) {
+  return PrintContainer(os, v);
+}
+
+template <class T, class V>
+std::ostream& operator<<(std::ostream &os, const std::map<T, V> &v) {
+  return PrintContainer(os, v);
 }
 
 template <class T, class U>
@@ -44,22 +55,16 @@ std::ostream& operator<<(std::ostream &os, const std::pair<T, U> &v) {
   return os << "{" << a << ", " << b << "}";
 }
 
+template <class T, class V>
+std::ostream& operator<<(std::ostream& os, const std::unordered_map<T, V> &map) {
+  return PrintContainer(os, map);
+}
+
 std::ostream& operator<<(std::ostream& os, const std::optional<size_t> &v) {
   if (v == std::nullopt)
     return os << "nullopt";
   else
     return os << *v;
-}
-
-template <class T, class V>
-std::ostream& operator<<(std::ostream& os, const std::unordered_map<T, V> &map) {
-  os << "{";
-  bool first = true;
-  for (const auto &[a, b] : map) {
-    if (!first) os << ", ";
-    os << "{" << a << ", " << b << "}";
-  }
-  return os << "}";
 }
 
 size_t ComputeBetaI(const std::vector<size_t> &critical_markers, size_t i) {
@@ -785,17 +790,30 @@ int main() {
   }
   const std::vector<std::optional<size_t>> opt_result = opt.GetStackDepths();
   assert(opt_result.size() == trace.size());
-  Csa cma;
-  size_t time = 0;
-  for (auto &[address, depth] : trace) {
-    //std::cout << "Accessing " << address << std::endl;
-    auto [c, lru_depth] = cma.Access(address);
-    assert(c == opt_result[time]);
-    //std::cout << "a=" << address << " c=" << c << std::endl << cma << std::endl;
-    // std::cout << std::endl;
-    assert(depth == SIZE_MAX || depth == c);
-    cma.Validate();
-    ++time;
+  {
+    Csa csa;
+    size_t time = 0;
+    for (auto &[address, depth] : trace) {
+      //std::cout << "Accessing " << address << std::endl;
+      auto [c, lru_depth] = csa.Access(address);
+      assert(c == opt_result[time]);
+      //std::cout << "a=" << address << " c=" << c << std::endl << csa << std::endl;
+      // std::cout << std::endl;
+      assert(depth == SIZE_MAX || depth == c);
+      csa.Validate();
+      ++time;
+    }
   }
   randomtest();
+  verbose=true;
+  {
+    Cma cma;
+    const std::vector<std::string> trace =
+        {"b", "a", "d", "a", "c", "b", "e", "f", "e", "c"};
+    for (size_t i = 0; i < trace.size(); ++i) {
+      cma.Access(trace[i]);
+      std::cout << trace[i] << i << std::endl;
+      std::cout << cma << std::endl << std::endl;
+    }
+  }
 }
