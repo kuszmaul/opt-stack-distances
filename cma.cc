@@ -667,42 +667,49 @@ static void TestABCABC() {
   CHECK_EQ(cnc.GetM(), {1});
   CHECK_EQ(cnc.GetBeta(), {0});
   CHECK_EQ(cnc.GetGamma(), {1});
+  // Phi should be {1}
 
   CHECK_EQ(cnc.Access("b"), TI({{}, {}}));
   CHECK_EQ(cnc.GetL(), VS({"b", "a"}));
   CHECK_EQ(cnc.GetM(), VI({2, 1}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({2, 1}));
+  // Phi should be {1, 2}
 
   CHECK_EQ(cnc.Access("c"), TI({{}, {}}));
   CHECK_EQ(cnc.GetL(), VS({"c", "b", "a"}));
   CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({3, 2, 1}));
+  // Phi should be {1, 2, 3}
 
   CHECK_EQ(cnc.Access("a"), TI({{1}, {2}}));
   CHECK_EQ(cnc.GetL(), VS({"a", "c", "b"}));
   CHECK_EQ(cnc.GetM(), VI({3, 1, 2}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({1, 3, 2}));
+  // Phi should be {3, 2, 1}
 
   CHECK_EQ(cnc.Access("b"), TI({{2}, {2}}));
   CHECK_EQ(cnc.GetL(), VS({"b", "a", "c"}));
   CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({2, 1, 3}));
+  // Phi should be {2, 3, 1}
 
   CHECK_EQ(cnc.Access("c"), TI({{1}, {2}}));
   CHECK_EQ(cnc.GetL(), VS({"c", "b", "a"}));
   CHECK_EQ(cnc.GetM(), VI({3, 1, 2}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({1, 2, 3}));
+  // Phi should be {3, 1, 2}
 
   CHECK_EQ(cnc.Access("a"), TI({{2}, {2}}));
   CHECK_EQ(cnc.GetL(), VS({"a", "c", "b"}));
   CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
   CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
   CHECK_EQ(cnc.GetGamma(), VI({2, 1, 3}));
+  // Phi should be {2, 3, 1}
 
 }
 
