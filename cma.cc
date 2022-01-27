@@ -385,10 +385,26 @@ class Csa {
   const OrderStatisticTree<TimeStamp, std::string> &GetL() const { return lru_stack_; }
   const std::vector<size_t> &GetM() const { return critical_markers_; }
   const std::vector<size_t> &GetBeta() const { return beta_; }
+  std::vector<size_t> GetGamma() const {
+    std::vector<size_t> result;
+    for (size_t i = 0; i < gamma_.Size(); ++i) {
+      auto [timestamp, crit] = gamma_.Select(i);
+      result.push_back(crit);
+    }
+    return result;
+  }
   friend std::ostream& operator<<(std::ostream&os, const Csa &csa) {
     os << "L=" << csa.lru_stack_ << std::endl;
     os << "G=" << csa.gamma_ << std::endl;
     os << "Ginv=" << csa.gamma_inverted_ << std::endl;
+    os << "Phi should be={";
+    for (size_t i = 0; i < csa.gamma_.Size(); ++i) {
+      if (i != 0) os << ", ";
+      auto [time, capacity] = csa.gamma_.Select(i);
+      assert(capacity > 0);
+      os << csa.critical_markers_[capacity-1];
+    }
+    std::cout << "}" << std::endl;
     os << "S=" << csa.stack_positions_ << std::endl;
     os << "M=" << csa.critical_markers_ << std::endl;
     os << "B=" << csa.beta_ << std::endl;
@@ -620,7 +636,15 @@ class CsaAndCma {
     return cma_result;
   }
   const std::vector<size_t> &GetM() const { return cma_.GetM(); }
-  const std::vector<size_t> &GetBeta() const { return cma_.GetBeta(); }
+  const std::vector<size_t> &GetBeta() const {
+    auto& csa_beta = csa_.GetBeta();
+    auto& cma_beta = cma_.GetBeta();
+    CHECK_EQ(csa_beta, cma_beta);
+    return cma_beta;
+  }
+  std::vector<size_t> GetGamma() const {
+    return csa_.GetGamma();
+  }
   std::optional<size_t> GetMostRecentZ() const { return cma_.most_recent_z_; }
   std::optional<size_t> GetMostRecentDopt() const { return cma_.most_recent_dopt_; }
   friend std::ostream& operator<<(std::ostream&os, const CsaAndCma &both) {
@@ -634,6 +658,54 @@ class CsaAndCma {
 
 using TI = std::pair<std::optional<size_t>, std::optional<size_t>>;
 using VI = std::vector<size_t>;
+using VS = std::vector<std::string>;
+
+static void TestABCABC() {
+  CsaAndCma cnc;
+  CHECK_EQ(cnc.Access("a"), TI({{}, {}}));
+  CHECK_EQ(cnc.GetL(), {"a"});
+  CHECK_EQ(cnc.GetM(), {1});
+  CHECK_EQ(cnc.GetBeta(), {0});
+  CHECK_EQ(cnc.GetGamma(), {1});
+
+  CHECK_EQ(cnc.Access("b"), TI({{}, {}}));
+  CHECK_EQ(cnc.GetL(), VS({"b", "a"}));
+  CHECK_EQ(cnc.GetM(), VI({2, 1}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({2, 1}));
+
+  CHECK_EQ(cnc.Access("c"), TI({{}, {}}));
+  CHECK_EQ(cnc.GetL(), VS({"c", "b", "a"}));
+  CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({3, 2, 1}));
+
+  CHECK_EQ(cnc.Access("a"), TI({{1}, {2}}));
+  CHECK_EQ(cnc.GetL(), VS({"a", "c", "b"}));
+  CHECK_EQ(cnc.GetM(), VI({3, 1, 2}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({1, 3, 2}));
+
+  CHECK_EQ(cnc.Access("b"), TI({{2}, {2}}));
+  CHECK_EQ(cnc.GetL(), VS({"b", "a", "c"}));
+  CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({2, 1, 3}));
+
+  CHECK_EQ(cnc.Access("c"), TI({{1}, {2}}));
+  CHECK_EQ(cnc.GetL(), VS({"c", "b", "a"}));
+  CHECK_EQ(cnc.GetM(), VI({3, 1, 2}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({1, 2, 3}));
+
+  CHECK_EQ(cnc.Access("a"), TI({{2}, {2}}));
+  CHECK_EQ(cnc.GetL(), VS({"a", "c", "b"}));
+  CHECK_EQ(cnc.GetM(), VI({3, 2, 1}));
+  CHECK_EQ(cnc.GetBeta(), VI({0, 0, 0}));
+  CHECK_EQ(cnc.GetGamma(), VI({2, 1, 3}));
+
+}
+
 
 static void TestABCDEB() {
   CsaAndCma cma;
@@ -767,6 +839,8 @@ void randomtest() {
 int main() {
   TestBeta();
   TestBetaPrefix();
+  TestABCABC();
+  return 0;
   TestABCDEB();
   const std::vector<std::pair<std::string, std::optional<size_t>>> trace =
       {{"a", {}}, // OPT=a
@@ -790,6 +864,7 @@ int main() {
   }
   const std::vector<std::optional<size_t>> opt_result = opt.GetStackDepths();
   assert(opt_result.size() == trace.size());
+  verbose=true;
   {
     Csa csa;
     size_t time = 0;
@@ -804,8 +879,8 @@ int main() {
       ++time;
     }
   }
+  verbose=false;
   randomtest();
-  verbose=true;
   {
     Cma cma;
     const std::vector<std::string> trace =
